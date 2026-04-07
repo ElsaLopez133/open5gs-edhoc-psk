@@ -353,6 +353,10 @@ ogs_pkbuf_t *gmm_build_identity_request(amf_ue_t *amf_ue)
 
 ogs_pkbuf_t *gmm_build_authentication_request(amf_ue_t *amf_ue)
 {
+    static uint8_t edhoc_dummy_start[] = {
+        0x01, 0x01, 0x00, 0x10, 0x02,
+        'E', 'D', 'H', 'O', 'C', '-', 'S', 'T', 'A', 'R', 'T'
+    };
     ogs_nas_5gs_message_t message;
     ogs_nas_5gs_authentication_request_t *authentication_request =
         &message.gmm.authentication_request;
@@ -368,6 +372,17 @@ ogs_pkbuf_t *gmm_build_authentication_request(amf_ue_t *amf_ue)
     authentication_request->ngksi.value = amf_ue->nas.amf.ksi;
     authentication_request->abba.length = amf_ue->abba_len;
     memcpy(authentication_request->abba.value, amf_ue->abba, amf_ue->abba_len);
+
+    if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
+        ogs_info("EDHOC: sending dummy authentication request for UE[%s]",
+                amf_ue->suci ? amf_ue->suci : "(unknown)");
+        authentication_request->presencemask |=
+            OGS_NAS_5GS_AUTHENTICATION_REQUEST_EAP_MESSAGE_PRESENT;
+        authentication_request->eap_message.length =
+            sizeof(edhoc_dummy_start);
+        authentication_request->eap_message.buffer = edhoc_dummy_start;
+        return ogs_nas_5gs_plain_encode(&message);
+    }
 
     authentication_request->presencemask |=
     OGS_NAS_5GS_AUTHENTICATION_REQUEST_AUTHENTICATION_PARAMETER_RAND_PRESENT;

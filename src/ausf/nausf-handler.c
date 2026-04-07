@@ -21,6 +21,30 @@
 #include "nnrf-handler.h"
 #include "nausf-handler.h"
 
+static const char *edhoc_dummy_response = "EDHOC-RESPONSE";
+
+static bool edhoc_dummy_response_matches(const char *hex_payload)
+{
+    uint8_t payload[256];
+    int payload_len;
+
+    ogs_assert(hex_payload);
+
+    payload_len = strlen(hex_payload) / 2;
+    if (payload_len < 5 || payload_len > (int)sizeof(payload))
+        return false;
+
+    ogs_ascii_to_hex(hex_payload, strlen(hex_payload), payload, sizeof(payload));
+
+    if (payload[0] != 0x02 || payload[4] != 0x02)
+        return false;
+
+    if (payload_len - 5 != (int)strlen(edhoc_dummy_response))
+        return false;
+
+    return memcmp(payload + 5, edhoc_dummy_response,
+            strlen(edhoc_dummy_response)) == 0;
+}
 bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
         ogs_sbi_stream_t *stream, ogs_sbi_message_t *recvmsg)
 {
@@ -93,6 +117,25 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
             ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
                 recvmsg, "No ConfirmationData.resStar", ausf_ue->suci, NULL));
         return false;
+    }
+
+    if (ausf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
+        if (!edhoc_dummy_response_matches(res_star_string)) {
+            ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+        } else {
+            ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
+            ogs_info("EDHOC: dummy authentication response accepted for UE[%s]",
+                    ausf_ue->suci);
+        }
+
+        r = ausf_sbi_discover_and_send(
+                OGS_SBI_SERVICE_TYPE_NUDM_UEAU, NULL,
+                ausf_nudm_ueau_build_result_confirmation_inform,
+                ausf_ue, stream, NULL);
+        ogs_expect(r == OGS_OK);
+        ogs_assert(r != OGS_ERROR);
+
+        return true;
     }
 
     ogs_ascii_to_hex(res_star_string, strlen(res_star_string),

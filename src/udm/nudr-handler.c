@@ -106,9 +106,18 @@ bool udm_nudr_dr_handle_subscription_authentication(
                         udm_ue->suci, NULL));
                 return false;
             }
-
-            if (AuthenticationSubscription->authentication_method !=
-                    OpenAPI_auth_method_5G_AKA) {
+            // subscription
+            // → set auth_type = EDHOC_PSK
+            // → skip AKA logic
+            // → return AuthenticationInfoResult with authType = EDHOC_PSK
+            // This reads what the subscriber is configured to use (from UDR data).
+            switch (AuthenticationSubscription->authentication_method) {
+            case OpenAPI_auth_method_5G_AKA: // Do nothing → default behavior stays 5G-AKA
+                break;
+            case OpenAPI_auth_method_EDHOC_PSK:
+                udm_ue->auth_type = OpenAPI_auth_type_EDHOC_PSK; // For this UE, we will run EDHOC-PSK instead of AKA
+                break;
+            default:
                 ogs_error("[%s] Not supported Auth Method [%d]",
                         udm_ue->suci,
                         AuthenticationSubscription->authentication_method);
@@ -118,7 +127,29 @@ bool udm_nudr_dr_handle_subscription_authentication(
                         recvmsg, "Not supported Auth Method", udm_ue->suci,
                         NULL));
                 return false;
+            }
 
+            if (udm_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
+                memset(&AuthenticationInfoResult,
+                        0, sizeof(AuthenticationInfoResult));
+
+                AuthenticationInfoResult.supi = udm_ue->supi;
+                AuthenticationInfoResult.auth_type = udm_ue->auth_type;
+
+                memset(&sendmsg, 0, sizeof(sendmsg));
+
+                ogs_assert(AuthenticationInfoResult.auth_type);
+                sendmsg.AuthenticationInfoResult = &AuthenticationInfoResult;
+
+                ogs_info("EDHOC: UDM returning dummy authentication info for UE[%s]",
+                        udm_ue->suci);
+
+                response = ogs_sbi_build_response(
+                        &sendmsg, OGS_SBI_HTTP_STATUS_OK);
+                ogs_assert(response);
+                ogs_assert(true ==
+                    ogs_sbi_server_send_response(stream, response));
+                break;
             }
 
             if (!AuthenticationSubscription->enc_permanent_key) {
@@ -207,6 +238,19 @@ bool udm_nudr_dr_handle_subscription_authentication(
 
             AuthenticationInfoResult.supi = udm_ue->supi;
             AuthenticationInfoResult.auth_type = udm_ue->auth_type;
+
+            if (udm_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
+                memset(&sendmsg, 0, sizeof(sendmsg));
+                ogs_assert(AuthenticationInfoResult.auth_type);
+                sendmsg.AuthenticationInfoResult = &AuthenticationInfoResult;
+
+                response = ogs_sbi_build_response(
+                        &sendmsg, OGS_SBI_HTTP_STATUS_OK);
+                ogs_assert(response);
+                ogs_assert(true ==
+                    ogs_sbi_server_send_response(stream, response));
+                return true;
+            }
 
             ogs_random(udm_ue->rand, OGS_RAND_LEN);
 #if 0

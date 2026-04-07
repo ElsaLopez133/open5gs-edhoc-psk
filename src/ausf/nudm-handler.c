@@ -19,11 +19,20 @@
 
 #include "nudm-handler.h"
 
+static const uint8_t edhoc_dummy_kausf_seed[OGS_SHA256_DIGEST_SIZE] = {
+    0x45, 0x44, 0x48, 0x4f, 0x43, 0x5f, 0x50, 0x53,
+    0x4b, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x01,
+    0x45, 0x44, 0x48, 0x4f, 0x43, 0x5f, 0x50, 0x53,
+    0x4b, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x02,
+};
+
 static const char *links_member_name(OpenAPI_auth_type_e auth_type)
 {
     if (auth_type == OpenAPI_auth_type_5G_AKA ||
         auth_type == OpenAPI_auth_type_EAP_AKA_PRIME) {
         return OGS_SBI_RESOURCE_NAME_5G_AKA;
+    } else if (auth_type == OpenAPI_auth_type_EDHOC_PSK) {
+        return OGS_SBI_RESOURCE_NAME_EAP_SESSION;
     } else if (auth_type == OpenAPI_auth_type_EAP_TLS) {
         return OGS_SBI_RESOURCE_NAME_EAP_SESSION;
     }
@@ -69,8 +78,18 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
     }
 
     /* See TS29.509 6.1.7.3 Application Errors */
-    if (AuthenticationInfoResult->auth_type !=
-            OpenAPI_auth_type_5G_AKA) {
+    /*
+     *  accept only supported auth types
+     *  If UDM says 5G_AKA, AUSF accepts it.
+     *  If UDM says EDHOC_PSK, AUSF also accepts it.
+     *  Anything else → error, HTTP 501 Not Implemented.
+    */
+    switch (AuthenticationInfoResult->auth_type) {
+    case OpenAPI_auth_type_5G_AKA:
+        break;
+    case OpenAPI_auth_type_EDHOC_PSK:
+        break;
+    default:
         ogs_error("[%s] Not supported Auth Method [%d]",
             ausf_ue->suci, AuthenticationInfoResult->auth_type);
         ogs_assert(true ==
@@ -81,18 +100,20 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         return false;
     }
 
-    AuthenticationVector =
-        AuthenticationInfoResult->authentication_vector;
-    if (!AuthenticationVector) {
-        ogs_error("[%s] No AuthenticationVector", ausf_ue->suci);
-        ogs_assert(true ==
-            ogs_sbi_server_send_error(stream,
-                OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                recvmsg, "No AuthenticationVector", ausf_ue->suci, NULL));
-        return false;
+    AuthenticationVector = AuthenticationInfoResult->authentication_vector;
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA) {
+        if (!AuthenticationVector) {
+            ogs_error("[%s] No AuthenticationVector", ausf_ue->suci);
+            ogs_assert(true ==
+                ogs_sbi_server_send_error(stream,
+                    OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                    recvmsg, "No AuthenticationVector", ausf_ue->suci, NULL));
+            return false;
+        }
     }
 
-    if (AuthenticationVector->av_type != OpenAPI_av_type_5G_HE_AKA) {
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA &&
+        AuthenticationVector->av_type != OpenAPI_av_type_5G_HE_AKA) {
         ogs_error("[%s] Not supported Auth Method [%d]",
             ausf_ue->suci, AuthenticationVector->av_type);
         /*
@@ -117,7 +138,8 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         return false;
     }
 
-    if (!AuthenticationVector->rand) {
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA &&
+        !AuthenticationVector->rand) {
         ogs_error("[%s] No AuthenticationVector.rand", ausf_ue->suci);
         ogs_assert(true ==
             ogs_sbi_server_send_error(stream,
@@ -127,7 +149,8 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         return false;
     }
 
-    if (!AuthenticationVector->xres_star) {
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA &&
+        !AuthenticationVector->xres_star) {
         ogs_error("[%s] No AuthenticationVector.xresStar",
                 ausf_ue->suci);
         ogs_assert(true ==
@@ -138,7 +161,8 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         return false;
     }
 
-    if (!AuthenticationVector->autn) {
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA &&
+        !AuthenticationVector->autn) {
         ogs_error("[%s] No AuthenticationVector.autn", ausf_ue->suci);
         ogs_assert(true ==
             ogs_sbi_server_send_error(stream,
@@ -148,7 +172,8 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         return false;
     }
 
-    if (!AuthenticationVector->kausf) {
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA &&
+        !AuthenticationVector->kausf) {
         ogs_error("[%s] No AuthenticationVector.kausf", ausf_ue->suci);
         ogs_assert(true ==
             ogs_sbi_server_send_error(stream,
@@ -157,7 +182,8 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
                 NULL));
         return false;
     }
-
+    // supi is always required.
+    // AUSF still needs to know which subscriber this authentication belongs to.
     if (!AuthenticationInfoResult->supi) {
         ogs_error("[%s] No AuthenticationVector.supi", ausf_ue->suci);
         ogs_assert(true ==
@@ -169,6 +195,9 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
     }
 
     /* SUPI */
+    // It removes the old SUPI mapping if present,
+    // then stores the new one and reindexes the UE in the AUSF hash table.
+    // So now this ausf_ue object is linked to that subscriber identity.
     if (ausf_ue->supi) {
         ogs_hash_set(ausf_self()->supi_hash,
                 ausf_ue->supi, strlen(ausf_ue->supi), NULL);
@@ -181,33 +210,48 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
 
     ausf_ue->auth_type = AuthenticationInfoResult->auth_type;
 
-    ogs_ascii_to_hex(
-        AuthenticationVector->rand,
-        strlen(AuthenticationVector->rand),
-        ausf_ue->rand, sizeof(ausf_ue->rand));
-    ogs_ascii_to_hex(
-        AuthenticationVector->xres_star,
-        strlen(AuthenticationVector->xres_star),
-        ausf_ue->xres_star, sizeof(ausf_ue->xres_star));
-    ogs_ascii_to_hex(
-        AuthenticationVector->kausf,
-        strlen(AuthenticationVector->kausf),
-        ausf_ue->kausf, sizeof(ausf_ue->kausf));
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA) {
+        ogs_ascii_to_hex(
+            AuthenticationVector->rand,
+            strlen(AuthenticationVector->rand),
+            ausf_ue->rand, sizeof(ausf_ue->rand));
+        ogs_ascii_to_hex(
+            AuthenticationVector->xres_star,
+            strlen(AuthenticationVector->xres_star),
+            ausf_ue->xres_star, sizeof(ausf_ue->xres_star));
+        ogs_ascii_to_hex(
+            AuthenticationVector->kausf,
+            strlen(AuthenticationVector->kausf),
+            ausf_ue->kausf, sizeof(ausf_ue->kausf));
+    } else {
+        // There is no AKA vector, so no real K_AUSF from the standard AKA derivation.
+        // still need something in ausf_ue->kausf, because later Open5GS code expects it to exist,
+        // so I seed it with a deterministic dummy value.
+        memcpy(ausf_ue->kausf, edhoc_dummy_kausf_seed, sizeof(ausf_ue->kausf));
+    }
 
     memset(&UeAuthenticationCtx, 0, sizeof(UeAuthenticationCtx));
 
     UeAuthenticationCtx.auth_type = ausf_ue->auth_type;
 
     memset(&AV5G_AKA, 0, sizeof(AV5G_AKA));
-    AV5G_AKA.rand = AuthenticationVector->rand;
-    AV5G_AKA.autn = AuthenticationVector->autn;
+    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA) {
+        AV5G_AKA.rand = AuthenticationVector->rand;
+        AV5G_AKA.autn = AuthenticationVector->autn;
 
-    ogs_kdf_hxres_star(ausf_ue->rand, ausf_ue->xres_star,
-            ausf_ue->hxres_star);
-    ogs_hex_to_ascii(ausf_ue->hxres_star, sizeof(ausf_ue->hxres_star),
-            hxres_star_string, sizeof(hxres_star_string));
-    AV5G_AKA.hxres_star = hxres_star_string;
-
+        ogs_kdf_hxres_star(ausf_ue->rand, ausf_ue->xres_star,
+                ausf_ue->hxres_star);
+        ogs_hex_to_ascii(ausf_ue->hxres_star, sizeof(ausf_ue->hxres_star),
+                hxres_star_string, sizeof(hxres_star_string));
+        AV5G_AKA.hxres_star = hxres_star_string;
+    } else {
+        // EDHOC uses RAND/AUTN/HXRES*
+        // The response object structure expects these fields, so we populate them with inert placeholders.
+        AV5G_AKA.rand = (char *)"EDHOC-DUMMY-RAND";
+        AV5G_AKA.autn = (char *)"EDHOC-DUMMY-AUTN";
+        AV5G_AKA.hxres_star = (char *)"EDHOC-DUMMY-HXRES";
+    }
+    // So even for EDHOC, the outgoing UeAuthenticationCtx still carries _5g_auth_data.
     UeAuthenticationCtx._5g_auth_data = &AV5G_AKA;
 
     memset(&LinksValueSchemeValue, 0, sizeof(LinksValueSchemeValue));
@@ -215,11 +259,18 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
     memset(&header, 0, sizeof(header));
     header.service.name = (char *)OGS_SBI_SERVICE_NAME_NAUSF_AUTH;
     header.api.version = (char *)OGS_SBI_API_V1;
+    /*
+    * The generated URI depends on the auth type:
+    *   5G-AKA → next resource is 5g-aka-confirmation
+    *   EDHOC-PSK → next resource is eap-session
+     */
     header.resource.component[0] =
             (char *)OGS_SBI_RESOURCE_NAME_UE_AUTHENTICATIONS;
     header.resource.component[1] = ausf_ue->ctx_id;
-    header.resource.component[2] =
-            (char *)OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION;
+    header.resource.component[2] = (char *)(
+            AuthenticationInfoResult->auth_type == OpenAPI_auth_type_EDHOC_PSK ?
+            OGS_SBI_RESOURCE_NAME_EAP_SESSION :
+            OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION);
     LinksValueSchemeValue.href = ogs_sbi_server_uri(server, &header);
     LinksValueScheme = OpenAPI_map_create(
             (char *)links_member_name(UeAuthenticationCtx.auth_type),

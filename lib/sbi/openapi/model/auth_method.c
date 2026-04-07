@@ -6,7 +6,7 @@
 
 char* OpenAPI_auth_method_ToString(OpenAPI_auth_method_e auth_method)
 {
-    const char *auth_methodArray[] =  { "NULL", "5G_AKA", "EAP_AKA_PRIME", "EAP_TLS", "EAP_TTLS", "NONE" };
+    const char *auth_methodArray[] =  { "NULL", "5G_AKA", "EAP_AKA_PRIME", "EAP_TLS", "EAP_TTLS", "NONE", "EDHOC_PSK" };
     size_t sizeofArray = sizeof(auth_methodArray) / sizeof(auth_methodArray[0]);
     if (auth_method < sizeofArray)
         return (char *)auth_methodArray[auth_method];
@@ -17,7 +17,7 @@ char* OpenAPI_auth_method_ToString(OpenAPI_auth_method_e auth_method)
 OpenAPI_auth_method_e OpenAPI_auth_method_FromString(char* auth_method)
 {
     int stringToReturn = 0;
-    const char *auth_methodArray[] =  { "NULL", "5G_AKA", "EAP_AKA_PRIME", "EAP_TLS", "EAP_TTLS", "NONE" };
+    const char *auth_methodArray[] =  { "NULL", "5G_AKA", "EAP_AKA_PRIME", "EAP_TLS", "EAP_TTLS", "NONE", "EDHOC_PSK" };
     size_t sizeofArray = sizeof(auth_methodArray) / sizeof(auth_methodArray[0]);
     while (stringToReturn < sizeofArray) {
         if (strcmp(auth_method, auth_methodArray[stringToReturn]) == 0) {
@@ -27,4 +27,3 @@ OpenAPI_auth_method_e OpenAPI_auth_method_FromString(char* auth_method)
     }
     return 0;
 }
-

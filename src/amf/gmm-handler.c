@@ -952,6 +952,7 @@ int gmm_handle_authentication_response(amf_ue_t *amf_ue,
 {
     ogs_nas_authentication_response_parameter_t
         *authentication_response_parameter = NULL;
+    ogs_nas_eap_message_t *eap_message = NULL;
     uint8_t hxres_star[OGS_MAX_RES_LEN];
     int r;
 
@@ -964,6 +965,36 @@ int gmm_handle_authentication_response(amf_ue_t *amf_ue,
     ogs_debug("[%s] Authentication response", amf_ue->suci);
 
     CLEAR_AMF_UE_TIMER(amf_ue->t3560);
+
+    /*
+     * this is the AMF-side handoff of the UE’s EDHOC message back to AUSF,
+     * using the existing NAS Authentication Response path.
+     */
+    if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
+        // This takes the eap_message field from the NAS Authentication Response.
+        // It uses the NAS EAP container as the place where the UE sends back.
+        // This is transport reuse.
+        eap_message = &authentication_response->eap_message;
+        if (!(authentication_response->presencemask &
+                OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EAP_MESSAGE_PRESENT) ||
+            !eap_message->buffer || !eap_message->length) {
+            ogs_error("[%s] No EAP message for EDHOC_PSK", amf_ue->suci);
+            return OGS_ERROR;
+        }
+        // “Take the EDHOC payload received from the UE over NAS and send
+        // it to AUSF as the authentication confirmation/continuation message.”
+        // Even though the builder name says authenticate_confirmation,
+        // this is no longer just “AKA confirmation”;
+        // it is being reused as the generic next-step message from UE to AUSF.
+        r = amf_ue_sbi_discover_and_send(
+                OGS_SBI_SERVICE_TYPE_NAUSF_AUTH, NULL,
+                amf_nausf_auth_build_authenticate_confirmation,
+                amf_ue, 0, eap_message);
+        ogs_expect(r == OGS_OK);
+        ogs_assert(r != OGS_ERROR);
+
+        return OGS_OK;
+    }
 
     if (authentication_response_parameter->length != OGS_MAX_RES_LEN) {
         ogs_error("[%s] Invalid length [%d]",
