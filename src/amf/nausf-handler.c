@@ -19,10 +19,18 @@
 
 #include "nausf-handler.h"
 #include "nas-path.h"
-
+/*
+* This handles the UeAuthenticationCtx received from AUSF.
+* This function is doing protocol dispatch at the AMF layer:
+* AKA → parse AKA challenge, send AKA NAS request
+* EDHOC → skip AKA challenge handling, still send NAS request but with EAP/EDHOC bootstrap payload
+* So the AMF is reusing the same high-level NAS state transition, but changing the content depending
+* on the chosen auth type.
+ */
 int amf_nausf_auth_handle_authenticate(
         amf_ue_t *amf_ue, ogs_sbi_message_t *message)
 {
+    const char *edhoc_link_key = OGS_SBI_RESOURCE_NAME_EAP_SESSION;
     int r;
     OpenAPI_ue_authentication_ctx_t *UeAuthenticationCtx = NULL;
     OpenAPI_ue_authentication_ctx_5g_auth_data_t *AV5G_AKA = NULL;
@@ -50,44 +58,66 @@ int amf_nausf_auth_handle_authenticate(
         ogs_error("[%s] No UeAuthenticationCtx", amf_ue->suci);
         return OGS_ERROR;
     }
-
-    if (UeAuthenticationCtx->auth_type != OpenAPI_auth_type_5G_AKA) {
+    // This stores the choice in AMF UE context.
+    amf_ue->auth_type = UeAuthenticationCtx->auth_type;
+    // we cna now branch on the accepted auth types.
+    // This is where AMF becomes aware of the new method.
+    switch (UeAuthenticationCtx->auth_type) {
+    case OpenAPI_auth_type_5G_AKA:
+        break;
+    case OpenAPI_auth_type_EDHOC_PSK:
+        break;
+    default:
         ogs_error("[%s] Not supported Auth Method [%d]",
             amf_ue->suci, UeAuthenticationCtx->auth_type);
         return OGS_ERROR;
     }
+    // Validate AKA data only if doing AKA.
+    // AMF is explicitly skipping AKA validation when auth type is EDHOC.
+    if (UeAuthenticationCtx->auth_type == OpenAPI_auth_type_5G_AKA) {
+        AV5G_AKA = UeAuthenticationCtx->_5g_auth_data;
+        if (!AV5G_AKA) {
+            ogs_error("[%s] No Av5gAka", amf_ue->suci);
+            return OGS_ERROR;
+        }
 
-    AV5G_AKA = UeAuthenticationCtx->_5g_auth_data;
-    if (!AV5G_AKA) {
-        ogs_error("[%s] No Av5gAka", amf_ue->suci);
-        return OGS_ERROR;
-    }
+        if (!AV5G_AKA->rand) {
+            ogs_error("[%s] No Av5gAka.rand", amf_ue->suci);
+            return OGS_ERROR;
+        }
 
-    if (!AV5G_AKA->rand) {
-        ogs_error("[%s] No Av5gAka.rand", amf_ue->suci);
-        return OGS_ERROR;
-    }
+        if (!AV5G_AKA->hxres_star) {
+            ogs_error("[%s] No Av5gAka.hxresStar", amf_ue->suci);
+            return OGS_ERROR;
+        }
 
-    if (!AV5G_AKA->hxres_star) {
-        ogs_error("[%s] No Av5gAka.hxresStar", amf_ue->suci);
-        return OGS_ERROR;
-    }
-
-    if (!AV5G_AKA->autn) {
-        ogs_error("[%s] No Av5gAka.autn", amf_ue->suci);
-        return OGS_ERROR;
+        if (!AV5G_AKA->autn) {
+            ogs_error("[%s] No Av5gAka.autn", amf_ue->suci);
+            return OGS_ERROR;
+        }
     }
 
     if (!UeAuthenticationCtx->_links) {
         ogs_error("[%s] No _links", amf_ue->suci);
         return OGS_ERROR;
     }
-
+    /*
+    * Regardless of auth method, AMF needs the continuation link.
+    * Because after sending the NAS request and getting the UE’s answer, AMF needs to know:
+    *   “Where do I send the next step back in the core?”
+    * That is why _links matters even for EDHOC.
+    * if auth type is EDHOC_PSK, look for the link named:
+    *   eap-session
+    * otherwise look for
+    *   5g-aka
+     */
     OpenAPI_list_for_each(UeAuthenticationCtx->_links, node) {
         LinksValueScheme = node->data;
         if (LinksValueScheme) {
             if (strcmp(LinksValueScheme->key,
-                        OGS_SBI_RESOURCE_NAME_5G_AKA) == 0) {
+                        UeAuthenticationCtx->auth_type ==
+                        OpenAPI_auth_type_EDHOC_PSK ?
+                        edhoc_link_key : OGS_SBI_RESOURCE_NAME_5G_AKA) == 0) {
                 LinksValueSchemeValue = LinksValueScheme->value;
                 break;
             }
@@ -95,7 +125,8 @@ int amf_nausf_auth_handle_authenticate(
     }
 
     if (!LinksValueSchemeValue) {
-        ogs_error("[%s] No _links.5g-aka", amf_ue->suci);
+        ogs_error("[%s] No authentication link for auth type [%d]",
+                amf_ue->suci, UeAuthenticationCtx->auth_type);
         return OGS_ERROR;
     }
 
@@ -104,6 +135,12 @@ int amf_nausf_auth_handle_authenticate(
         return OGS_ERROR;
     }
 
+    /*
+    * AMF setting up the network client needed to talk back to AUSF later.
+    * So after receiving the auth context, AMF prepares:
+    *   which endpoint to call later
+    *   with which client connection info
+     */
     rc = ogs_sbi_getaddr_from_uri(
             &scheme, &fqdn, &fqdn_port, &addr, &addr6, message->http.location);
     if (rc == false || scheme == OpenAPI_uri_scheme_NULL) {
@@ -133,8 +170,35 @@ int amf_nausf_auth_handle_authenticate(
     ogs_freeaddrinfo(addr);
     ogs_freeaddrinfo(addr6);
 
+    // it now stores either:
+    // AKA confirmation URI, or
+    // EDHOC eap-session URI
     STORE_5G_AKA_CONFIRMATION(amf_ue, LinksValueSchemeValue->href);
 
+    // EDHOC branch: send Authentication Request immediately.
+    // Even though this is not AKA, I still use the existing
+    // NAS Authentication Request message as the vehicle to start the UE-side authentication exchange.
+    // And in gmm-build.c, that Authentication Request is modified to contain an EAP payload EDHOC-START.
+    if (UeAuthenticationCtx->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
+        /* Clear Security Context */
+        CLEAR_SECURITY_CONTEXT(amf_ue);
+
+        if (amf_ue->nas.amf.ksi < (OGS_NAS_KSI_NO_KEY_IS_AVAILABLE - 1))
+            amf_ue->nas.amf.ksi++;
+        else
+            amf_ue->nas.amf.ksi = 0;
+
+        amf_ue->nas.ue.ksi = amf_ue->nas.amf.ksi;
+
+        r = nas_5gs_send_authentication_request(amf_ue);
+        ogs_expect(r == OGS_OK);
+        ogs_assert(r != OGS_ERROR);
+
+        return OGS_OK;
+    }
+    /*
+     *  AKA branch: convert RAND/HXRES/AUTN and send Authentication Request
+    */
     ogs_ascii_to_hex(AV5G_AKA->rand, strlen(AV5G_AKA->rand),
         amf_ue->rand, sizeof(amf_ue->rand));
     ogs_ascii_to_hex(AV5G_AKA->hxres_star, strlen(AV5G_AKA->hxres_star),
@@ -159,6 +223,7 @@ int amf_nausf_auth_handle_authenticate(
     return OGS_OK;
 }
 
+// This handles the final response from AUSF after authentication completes.
 int amf_nausf_auth_handle_authenticate_confirmation(
         amf_ue_t *amf_ue, ogs_sbi_message_t *message)
 {
@@ -169,6 +234,7 @@ int amf_nausf_auth_handle_authenticate_confirmation(
     ogs_assert(amf_ue);
     ogs_assert(message);
 
+    // AMF expects: supi, kseaf
     ConfirmationDataResponse = message->ConfirmationDataResponse;
     if (!ConfirmationDataResponse) {
         ogs_error("[%s] No ConfirmationDataResponse", amf_ue->suci);
@@ -184,7 +250,8 @@ int amf_nausf_auth_handle_authenticate_confirmation(
         ogs_error("[%s] No Kseaf", amf_ue->suci);
         return OGS_ERROR;
     }
-
+    // AMF is assuming that after the chosen authentication method completes,
+    // it will receive a valid KSEAF, and from that it derives KAMF.
     amf_ue->auth_result = ConfirmationDataResponse->auth_result;
     if (amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_SUCCESS) {
 

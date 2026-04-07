@@ -80,7 +80,7 @@ bool udr_nudr_dr_handle_subscription_authentication(
                     sizeof(AuthenticationSubscription));
 
             AuthenticationSubscription.authentication_method =
-                OpenAPI_auth_method_5G_AKA;
+                OpenAPI_auth_method_EDHOC_PSK;
 
             ogs_hex_to_ascii(auth_info.k, sizeof(auth_info.k),
                     k_string, sizeof(k_string));

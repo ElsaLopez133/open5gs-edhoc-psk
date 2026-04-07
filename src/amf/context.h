@@ -461,6 +461,7 @@ struct amf_ue_s {
         char *resource_uri;
         ogs_sbi_client_t *client;
     } confirmation_for_5g_aka;
+    OpenAPI_auth_type_e auth_type;
     /* Random challenge value */
     uint8_t         rand[OGS_RAND_LEN];
     /* Authentication token */
