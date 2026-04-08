@@ -20,30 +20,37 @@
 #include "sbi-path.h"
 #include "nnrf-handler.h"
 #include "nausf-handler.h"
+#include "lakers.h"
 
-static const char *edhoc_dummy_response = "EDHOC-RESPONSE";
-
-static bool edhoc_dummy_response_matches(const char *hex_payload)
+static bool edhoc_extract_message_1(
+        const char *hex_payload, EdhocMessageBuffer *message_1)
 {
     uint8_t payload[256];
     int payload_len;
 
     ogs_assert(hex_payload);
+    ogs_assert(message_1);
+
+    memset(message_1, 0, sizeof(*message_1));
 
     payload_len = strlen(hex_payload) / 2;
     if (payload_len < 5 || payload_len > (int)sizeof(payload))
         return false;
 
-    ogs_ascii_to_hex(hex_payload, strlen(hex_payload), payload, sizeof(payload));
+    ogs_ascii_to_hex((char *)hex_payload, strlen(hex_payload),
+            payload, sizeof(payload));
 
     if (payload[0] != 0x02 || payload[4] != 0x02)
         return false;
 
-    if (payload_len - 5 != (int)strlen(edhoc_dummy_response))
+    if ((payload_len - 5) <= 0 ||
+        (payload_len - 5) > (int)sizeof(message_1->content))
         return false;
 
-    return memcmp(payload + 5, edhoc_dummy_response,
-            strlen(edhoc_dummy_response)) == 0;
+    message_1->len = payload_len - 5;
+    memcpy(message_1->content, payload + 5, message_1->len);
+
+    return true;
 }
 bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
         ogs_sbi_stream_t *stream, ogs_sbi_message_t *recvmsg)
@@ -120,12 +127,34 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
     }
 
     if (ausf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        if (!edhoc_dummy_response_matches(res_star_string)) {
+        EdhocResponder responder;
+        EdhocMessageBuffer message_1;
+        EadItemsC ead_1;
+        uint8_t c_i = 0;
+        int8_t edhoc_rc;
+
+        if (!edhoc_extract_message_1(res_star_string, &message_1)) {
             ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_FAILURE;
         } else {
-            ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
-            ogs_info("EDHOC: dummy authentication response accepted for UE[%s]",
-                    ausf_ue->suci);
+            memset(&responder, 0, sizeof(responder));
+            memset(&ead_1, 0, sizeof(ead_1));
+
+            edhoc_rc = responder_new(&responder);
+            if (edhoc_rc == 0)
+                edhoc_rc = responder_process_message_1(&responder,
+                        &message_1, &c_i, &ead_1);
+
+            if (edhoc_rc != 0) {
+                ausf_ue->auth_result =
+                    OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                ogs_error("EDHOC: responder failed to parse message_1 for UE[%s] [rc=%d]",
+                        ausf_ue->suci, edhoc_rc);
+            } else {
+                ausf_ue->auth_result =
+                    OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
+                ogs_info("EDHOC: responder parsed message_1 for UE[%s] [len=%zu,c_i=%u]",
+                        ausf_ue->suci, (size_t)message_1.len, c_i);
+            }
         }
 
         r = ausf_sbi_discover_and_send(
