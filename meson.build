@@ -38,6 +38,15 @@ open5gs_build_dir = meson.current_build_dir()
 cc = meson.get_compiler('c')
 host_system = host_machine.system()
 
+lakers_inc = include_directories('/home/elsa/RustroverProjects/lakers/target/include')
+lakers_lib = cc.find_library(
+    'lakers_c',
+    dirs : '/home/elsa/RustroverProjects/lakers/target/x86_64-unknown-linux-gnu/release',
+    required : true)
+lakers_dep = declare_dependency(
+    include_directories : lakers_inc,
+    dependencies : lakers_lib)
+
 git = find_program('git', required: false)
 #python = import('python')
 #python3 = python.find_installation('python3')
