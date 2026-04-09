@@ -6,4 +6,8 @@ subprojects/libtins
 subprojects/prometheus-client-c
 subprojects/usrsctp
 
+run_logs/
+run_pids/
+open5gs/
+
 webui/.next
