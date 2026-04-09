@@ -23,6 +23,7 @@
 #include "ogs-app.h"
 #include "ogs-crypt.h"
 #include "ogs-sbi.h"
+#include "lakers.h"
 
 #include "ausf-sm.h"
 
@@ -73,6 +74,11 @@ struct ausf_ue_s {
         ogs_sbi_client_t *client;
     } auth_event;
     OpenAPI_auth_result_e auth_result;
+    /* EDHOC responder session state kept across message_1/message_3 SBI calls. */
+    bool edhoc_in_progress;
+    EdhocResponder edhoc_responder;
+    uint8_t edhoc_c_i;
+    uint8_t edhoc_c_r;
 
     uint8_t rand[OGS_RAND_LEN];
     uint8_t xres_star[OGS_MAX_RES_LEN];

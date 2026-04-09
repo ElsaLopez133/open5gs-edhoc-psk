@@ -374,13 +374,24 @@ ogs_pkbuf_t *gmm_build_authentication_request(amf_ue_t *amf_ue)
     memcpy(authentication_request->abba.value, amf_ue->abba, amf_ue->abba_len);
 
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        ogs_info("EDHOC: sending dummy authentication request for UE[%s]",
-                amf_ue->suci ? amf_ue->suci : "(unknown)");
+        /* EDHOC on N1 reuses NAS Authentication Request + EAP payload:
+         * first round sends bootstrap marker, later rounds relay message_2 bytes. */
+        ogs_info("EDHOC: sending authentication request for UE[%s] [%s]",
+                amf_ue->suci ? amf_ue->suci : "(unknown)",
+                amf_ue->edhoc_eap_payload_len ? "message_2 relay" : "dummy start");
         authentication_request->presencemask |=
             OGS_NAS_5GS_AUTHENTICATION_REQUEST_EAP_MESSAGE_PRESENT;
-        authentication_request->eap_message.length =
-            sizeof(edhoc_dummy_start);
-        authentication_request->eap_message.buffer = edhoc_dummy_start;
+        if (amf_ue->edhoc_eap_payload_len) {
+            authentication_request->eap_message.length =
+                amf_ue->edhoc_eap_payload_len;
+            authentication_request->eap_message.buffer =
+                amf_ue->edhoc_eap_payload;
+            amf_ue->edhoc_eap_payload_len = 0;
+        } else {
+            authentication_request->eap_message.length =
+                sizeof(edhoc_dummy_start);
+            authentication_request->eap_message.buffer = edhoc_dummy_start;
+        }
         return ogs_nas_5gs_plain_encode(&message);
     }
 

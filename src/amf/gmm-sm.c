@@ -2316,7 +2316,11 @@ void gmm_state_authentication(ogs_fsm_t *s, amf_event_t *e)
                 CASE(OGS_SBI_HTTP_METHOD_PUT)
                     rv = amf_nausf_auth_handle_authenticate_confirmation(
                             amf_ue, sbi_message);
-                    if (rv != OGS_OK) {
+                    /* OGS_DONE means EDHOC is mid-handshake (AUTHENTICATION_ONGOING):
+                     * stay in gmm_state_authentication and wait for next NAS exchange. */
+                    if (rv == OGS_DONE) {
+                        break;
+                    } else if (rv != OGS_OK) {
                         ogs_error("[%s] Cannot handle SBI message",
                                 amf_ue->suci);
                         r = nas_5gs_send_authentication_reject(amf_ue);

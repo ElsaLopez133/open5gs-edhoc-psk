@@ -22,33 +22,121 @@
 #include "nausf-handler.h"
 #include "lakers.h"
 
-static bool edhoc_extract_message_1(
-        const char *hex_payload, EdhocMessageBuffer *message_1)
+static const uint8_t edhoc_responder_r[32] = {
+    0x52, 0x45, 0x53, 0x50, 0x4f, 0x4e, 0x44, 0x45,
+    0x52, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x5f,
+    0x52, 0x5f, 0x30, 0x31, 0x52, 0x45, 0x53, 0x50,
+    0x4f, 0x4e, 0x44, 0x45, 0x52, 0x5f, 0x30, 0x32,
+};
+
+static const uint8_t edhoc_psk_cred[] = {
+    0xA2, 0x02, 0x69, 0x72, 0x65, 0x73, 0x70, 0x6F, 0x6E, 0x64, 0x65,
+    0x72, 0x08, 0xA1, 0x01, 0xA3, 0x01, 0x04, 0x02, 0x41, 0x10, 0x20,
+    0x50, 0x50, 0x93, 0x0F, 0xF4, 0x62, 0xA7, 0x7A, 0x35, 0x40, 0xCF,
+    0x54, 0x63, 0x25, 0xDE, 0xA2, 0x14,
+};
+
+/* Demo initiator credential used by resolver callback for ByReference message_3. */
+static const uint8_t edhoc_psk_cred_i[] = {
+    0xA2, 0x02, 0x69, 0x69, 0x6E, 0x69, 0x74, 0x69, 0x61, 0x74, 0x6F,
+    0x72, 0x08, 0xA1, 0x01, 0xA3, 0x01, 0x04, 0x02, 0x41, 0x10, 0x20,
+    0x50, 0x50, 0x93, 0x0F, 0xF4, 0x62, 0xA7, 0x7A, 0x35, 0x40, 0xCF,
+    0x54, 0x63, 0x25, 0xDE, 0xA2, 0x14,
+};
+
+typedef struct edhoc_cred_resolver_ctx_s {
+    const uint8_t *cred;
+    size_t cred_len;
+} edhoc_cred_resolver_ctx_t;
+
+static int8_t edhoc_resolve_cred_i(
+        const IdCred *id_cred_i, CredentialC *cred_out, void *context)
+{
+    edhoc_cred_resolver_ctx_t *ctx = context;
+
+    ogs_assert(id_cred_i);
+    ogs_assert(cred_out);
+    ogs_assert(ctx);
+    ogs_assert(ctx->cred);
+    ogs_assert(ctx->cred_len);
+
+    /* Demo resolver: always return one fixed Initiator PSK credential.
+     * FIXME: parse id_cred_i (e.g., kid) and fetch the matching credential
+     * from UDM/UDR-backed subscriber data instead of hardcoded bytes. */
+    (void)id_cred_i;
+    return credential_new_symmetric(cred_out, ctx->cred, ctx->cred_len);
+}
+
+static bool edhoc_extract_message_from_eap(
+        const char *hex_payload, EdhocMessageBuffer *message, uint8_t *eap_id)
 {
     uint8_t payload[256];
+    int eap_length;
     int payload_len;
 
     ogs_assert(hex_payload);
-    ogs_assert(message_1);
+    ogs_assert(message);
 
-    memset(message_1, 0, sizeof(*message_1));
+    memset(message, 0, sizeof(*message));
 
-    payload_len = strlen(hex_payload) / 2;
+    payload_len = strlen(hex_payload);
+    if (payload_len == 0 || (payload_len % 2) != 0)
+        return false;
+
+    payload_len /= 2;
     if (payload_len < 5 || payload_len > (int)sizeof(payload))
         return false;
 
     ogs_ascii_to_hex((char *)hex_payload, strlen(hex_payload),
             payload, sizeof(payload));
 
+    eap_length = ((int)payload[2] << 8) | payload[3];
+    if (eap_length != payload_len)
+        return false;
+
+    /* We currently carry EDHOC in EAP Notification packets. */
     if (payload[0] != 0x02 || payload[4] != 0x02)
         return false;
 
     if ((payload_len - 5) <= 0 ||
-        (payload_len - 5) > (int)sizeof(message_1->content))
+        (payload_len - 5) > (int)sizeof(message->content))
         return false;
 
-    message_1->len = payload_len - 5;
-    memcpy(message_1->content, payload + 5, message_1->len);
+    if (eap_id)
+        *eap_id = payload[1];
+
+    message->len = payload_len - 5;
+    memcpy(message->content, payload + 5, message->len);
+
+    return true;
+}
+
+static bool edhoc_build_eap_request_hex(
+        uint8_t eap_id, const EdhocMessageBuffer *message, char **hex_payload)
+{
+    uint8_t eap_packet[512];
+    int eap_packet_len;
+
+    ogs_assert(message);
+    ogs_assert(hex_payload);
+
+    *hex_payload = NULL;
+
+    if (message->len == 0 || message->len > (sizeof(eap_packet) - 5))
+        return false;
+
+    eap_packet_len = 5 + message->len;
+    eap_packet[0] = 0x01; /* EAP Request */
+    eap_packet[1] = eap_id;
+    eap_packet[2] = (eap_packet_len >> 8) & 0xff;
+    eap_packet[3] = eap_packet_len & 0xff;
+    eap_packet[4] = 0x02; /* EAP Notification */
+    memcpy(eap_packet + 5, message->content, message->len);
+
+    *hex_payload = ogs_malloc((eap_packet_len * 2) + 1);
+    ogs_assert(*hex_payload);
+    ogs_hex_to_ascii(eap_packet, eap_packet_len,
+            *hex_payload, (eap_packet_len * 2) + 1);
 
     return true;
 }
@@ -85,6 +173,10 @@ bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
         ogs_free(ausf_ue->serving_network_name);
     ausf_ue->serving_network_name = ogs_strdup(serving_network_name);
     ogs_assert(ausf_ue->serving_network_name);
+    ausf_ue->edhoc_in_progress = false;
+    memset(&ausf_ue->edhoc_responder, 0, sizeof(ausf_ue->edhoc_responder));
+    ausf_ue->edhoc_c_i = 0;
+    ausf_ue->edhoc_c_r = 0;
 
     r = ausf_sbi_discover_and_send(
             OGS_SBI_SERVICE_TYPE_NUDM_UEAU, NULL,
@@ -99,7 +191,10 @@ bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
 bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         ogs_sbi_stream_t *stream, ogs_sbi_message_t *recvmsg)
 {
+    ogs_sbi_message_t sendmsg;
+    ogs_sbi_response_t *response = NULL;
     OpenAPI_confirmation_data_t *ConfirmationData = NULL;
+    OpenAPI_confirmation_data_response_t ConfirmationDataResponse;
     char *res_star_string = NULL;
     uint8_t res_star[OGS_KEYSTRLEN(OGS_MAX_RES_LEN)];
     int r;
@@ -127,33 +222,113 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
     }
 
     if (ausf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        EdhocResponder responder;
-        EdhocMessageBuffer message_1;
+        EdhocMessageBuffer message_from_ue;
+        EdhocMessageBuffer message_2;
+        CredentialC cred_r;
         EadItemsC ead_1;
+        EadItemsC ead_2;
+        EadItemsC ead_3;
+        IdCred id_cred_i;
+        edhoc_cred_resolver_ctx_t resolver_ctx;
         uint8_t c_i = 0;
+        uint8_t c_r = 0;
+        uint8_t eap_id = 0;
+        char *message_2_hex = NULL;
         int8_t edhoc_rc;
 
-        if (!edhoc_extract_message_1(res_star_string, &message_1)) {
+        if (!edhoc_extract_message_from_eap(
+                    res_star_string, &message_from_ue, &eap_id)) {
             ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_FAILURE;
         } else {
-            memset(&responder, 0, sizeof(responder));
-            memset(&ead_1, 0, sizeof(ead_1));
+            if (!ausf_ue->edhoc_in_progress) {
+                /* First EDHOC leg: parse message_1 and return message_2 with
+                 * AUTHENTICATION_ONGOING so AMF relays it to UE. */
+                memset(&ead_1, 0, sizeof(ead_1));
+                memset(&ead_2, 0, sizeof(ead_2));
+                memset(&message_2, 0, sizeof(message_2));
+                memset(&cred_r, 0, sizeof(cred_r));
 
-            edhoc_rc = responder_new(&responder);
-            if (edhoc_rc == 0)
-                edhoc_rc = responder_process_message_1(&responder,
-                        &message_1, &c_i, &ead_1);
+                edhoc_rc = responder_new(&ausf_ue->edhoc_responder);
+                if (edhoc_rc == 0)
+                    edhoc_rc = responder_process_message_1(
+                            &ausf_ue->edhoc_responder,
+                            &message_from_ue, &c_i, &ead_1);
+                if (edhoc_rc == 0)
+                    edhoc_rc = credential_new_symmetric(&cred_r,
+                            edhoc_psk_cred, sizeof(edhoc_psk_cred));
+                if (edhoc_rc == 0)
+                    edhoc_rc = responder_prepare_message_2(
+                            &ausf_ue->edhoc_responder,
+                            (const BytesP256ElemLen *)edhoc_responder_r,
+                            &cred_r, ByReference,
+                            &c_r, &ead_2, &message_2);
+                if (edhoc_rc == 0)
+                    edhoc_rc = edhoc_build_eap_request_hex(
+                            (uint8_t)(eap_id + 1),
+                            &message_2, &message_2_hex) ? 0 : -1;
 
-            if (edhoc_rc != 0) {
-                ausf_ue->auth_result =
-                    OpenAPI_auth_result_AUTHENTICATION_FAILURE;
-                ogs_error("EDHOC: responder failed to parse message_1 for UE[%s] [rc=%d]",
-                        ausf_ue->suci, edhoc_rc);
+                if (edhoc_rc != 0) {
+                    ausf_ue->auth_result =
+                        OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                    ogs_error("EDHOC: failed to generate message_2 for UE[%s] [rc=%d]",
+                            ausf_ue->suci, edhoc_rc);
+                } else {
+                    ausf_ue->edhoc_in_progress = true;
+                    ausf_ue->edhoc_c_i = c_i;
+                    ausf_ue->edhoc_c_r = c_r;
+
+                    memset(&ConfirmationDataResponse, 0, sizeof(ConfirmationDataResponse));
+                    ConfirmationDataResponse.auth_result =
+                        OpenAPI_auth_result_AUTHENTICATION_ONGOING;
+                    ConfirmationDataResponse.kseaf = message_2_hex;
+                    ConfirmationDataResponse.supi = ausf_ue->supi;
+
+                    memset(&sendmsg, 0, sizeof(sendmsg));
+                    sendmsg.ConfirmationDataResponse = &ConfirmationDataResponse;
+
+                    response = ogs_sbi_build_response(&sendmsg, OGS_SBI_HTTP_STATUS_OK);
+                    ogs_assert(response);
+                    ogs_assert(true == ogs_sbi_server_send_response(stream, response));
+
+                    ogs_info("EDHOC: generated message_2 for UE[%s] [m1_len=%zu,m2_len=%zu,c_i=%u,c_r=%u]",
+                            ausf_ue->suci, (size_t)message_from_ue.len,
+                            (size_t)message_2.len,
+                            ausf_ue->edhoc_c_i, ausf_ue->edhoc_c_r);
+
+                    ogs_free(message_2_hex);
+                    return true;
+                }
             } else {
-                ausf_ue->auth_result =
-                    OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
-                ogs_info("EDHOC: responder parsed message_1 for UE[%s] [len=%zu,c_i=%u]",
-                        ausf_ue->suci, (size_t)message_1.len, c_i);
+                /* Second EDHOC leg: parse message_3 using resolver-based lookup
+                 * for ByReference ID_CRED_PSK. */
+                memset(&ead_3, 0, sizeof(ead_3));
+                memset(&id_cred_i, 0, sizeof(id_cred_i));
+                memset(&resolver_ctx, 0, sizeof(resolver_ctx));
+                resolver_ctx.cred = edhoc_psk_cred_i;
+                resolver_ctx.cred_len = sizeof(edhoc_psk_cred_i);
+                if (message_from_ue.len < 1) {
+                    ausf_ue->auth_result =
+                        OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                    ogs_error("EDHOC: message_3 too short for UE[%s] [len=%zu]",
+                            ausf_ue->suci, (size_t)message_from_ue.len);
+                } else {
+                    edhoc_rc = responder_parse_message_3_with_cred_resolver(
+                            &ausf_ue->edhoc_responder,
+                            &message_from_ue, &id_cred_i, &ead_3,
+                            edhoc_resolve_cred_i, &resolver_ctx);
+                    if (edhoc_rc != 0) {
+                        ausf_ue->auth_result =
+                            OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                        ogs_error("EDHOC: failed to parse message_3 for UE[%s] [rc=%d]",
+                                ausf_ue->suci, edhoc_rc);
+                    } else {
+                        ausf_ue->auth_result =
+                            OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
+                        ausf_ue->edhoc_in_progress = false;
+                        ogs_info("EDHOC: parsed message_3 for UE[%s] [len=%zu]",
+                                ausf_ue->suci, (size_t)message_from_ue.len);
+                    }
+                }
             }
         }
 
