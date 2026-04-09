@@ -26,6 +26,32 @@ static const uint8_t edhoc_dummy_kausf_seed[OGS_SHA256_DIGEST_SIZE] = {
     0x4b, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x02,
 };
 
+static bool edhoc_store_hex_blob(
+        const char *hex, uint8_t *out, size_t out_len, size_t *stored_len)
+{
+    size_t hex_len;
+    size_t bin_len;
+
+    ogs_assert(out);
+    ogs_assert(stored_len);
+
+    *stored_len = 0;
+    if (!hex)
+        return false;
+
+    hex_len = strlen(hex);
+    if (hex_len == 0 || (hex_len % 2) != 0)
+        return false;
+
+    bin_len = hex_len / 2;
+    if (bin_len > out_len)
+        return false;
+
+    ogs_ascii_to_hex((char *)hex, hex_len, out, out_len);
+    *stored_len = bin_len;
+    return true;
+}
+
 static const char *links_member_name(OpenAPI_auth_type_e auth_type)
 {
     if (auth_type == OpenAPI_auth_type_5G_AKA ||
@@ -224,6 +250,30 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
             strlen(AuthenticationVector->kausf),
             ausf_ue->kausf, sizeof(ausf_ue->kausf));
     } else {
+        ausf_ue->edhoc_kid_len = 0;
+        ausf_ue->edhoc_cred_i_len = 0;
+        if (AuthenticationVector && AuthenticationVector->rand &&
+            AuthenticationVector->kausf) {
+            if (!edhoc_store_hex_blob(AuthenticationVector->rand,
+                        ausf_ue->edhoc_kid, sizeof(ausf_ue->edhoc_kid),
+                        &ausf_ue->edhoc_kid_len) ||
+                !edhoc_store_hex_blob(AuthenticationVector->kausf,
+                        ausf_ue->edhoc_cred_i, sizeof(ausf_ue->edhoc_cred_i),
+                        &ausf_ue->edhoc_cred_i_len)) {
+                ogs_error("[%s] Invalid EDHOC credential carrier from UDM",
+                        ausf_ue->suci);
+                ogs_assert(true ==
+                    ogs_sbi_server_send_error(stream,
+                        OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                        recvmsg, "Invalid EDHOC credential carrier",
+                        ausf_ue->suci, NULL));
+                return false;
+            }
+            ogs_info("EDHOC: loaded kid/credential from UDM for UE[%s] [kid_len=%zu,cred_len=%zu]",
+                    ausf_ue->suci,
+                    ausf_ue->edhoc_kid_len, ausf_ue->edhoc_cred_i_len);
+        }
+
         // There is no AKA vector, so no real K_AUSF from the standard AKA derivation.
         // still need something in ausf_ue->kausf, because later Open5GS code expects it to exist,
         // so I seed it with a deterministic dummy value.

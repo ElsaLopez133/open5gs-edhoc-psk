@@ -79,6 +79,10 @@ struct ausf_ue_s {
     EdhocResponder edhoc_responder;
     uint8_t edhoc_c_i;
     uint8_t edhoc_c_r;
+    uint8_t edhoc_kid[16];
+    size_t edhoc_kid_len;
+    uint8_t edhoc_cred_i[192];
+    size_t edhoc_cred_i_len;
 
     uint8_t rand[OGS_RAND_LEN];
     uint8_t xres_star[OGS_MAX_RES_LEN];

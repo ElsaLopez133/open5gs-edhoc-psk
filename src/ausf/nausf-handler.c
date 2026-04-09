@@ -45,25 +45,81 @@ static const uint8_t edhoc_psk_cred_i[] = {
 };
 
 typedef struct edhoc_cred_resolver_ctx_s {
+    const uint8_t *kid;
+    size_t kid_len;
     const uint8_t *cred;
     size_t cred_len;
 } edhoc_cred_resolver_ctx_t;
+
+static bool edhoc_extract_kid_from_id_cred(
+        const IdCred *id_cred_i, const uint8_t **kid, size_t *kid_len)
+{
+    const uint8_t *b = NULL;
+    size_t len = 0;
+
+    ogs_assert(id_cred_i);
+    ogs_assert(kid);
+    ogs_assert(kid_len);
+
+    *kid = NULL;
+    *kid_len = 0;
+
+    b = id_cred_i->bytes.content;
+    len = id_cred_i->bytes.len;
+    if (!b || len < 3)
+        return false;
+
+    /* Expect full ID_CRED map form: {4: ...} */
+    if (b[0] != 0xa1 || b[1] != 0x04)
+        return false;
+
+    /* CBOR byte string (preferred for ByReference kid) */
+    if ((b[2] & 0xe0) == 0x40) {
+        size_t n = b[2] & 0x1f;
+        if (b[2] > 0x57 || len != (size_t)3 + n)
+            return false;
+        *kid = b + 3;
+        *kid_len = n;
+        return true;
+    }
+
+    /* Accept compact int encoding as a 1-byte kid for robustness. */
+    if (b[2] <= 0x17 && len == 3) {
+        *kid = b + 2;
+        *kid_len = 1;
+        return true;
+    }
+
+    return false;
+}
 
 static int8_t edhoc_resolve_cred_i(
         const IdCred *id_cred_i, CredentialC *cred_out, void *context)
 {
     edhoc_cred_resolver_ctx_t *ctx = context;
+    const uint8_t *kid = NULL;
+    size_t kid_len = 0;
 
     ogs_assert(id_cred_i);
     ogs_assert(cred_out);
     ogs_assert(ctx);
+    ogs_assert(ctx->kid);
+    ogs_assert(ctx->kid_len);
     ogs_assert(ctx->cred);
     ogs_assert(ctx->cred_len);
 
-    /* Demo resolver: always return one fixed Initiator PSK credential.
-     * FIXME: parse id_cred_i (e.g., kid) and fetch the matching credential
-     * from UDM/UDR-backed subscriber data instead of hardcoded bytes. */
-    (void)id_cred_i;
+    if (!edhoc_extract_kid_from_id_cred(id_cred_i, &kid, &kid_len)) {
+        ogs_error("EDHOC: resolver failed to parse ID_CRED_I");
+        return -1;
+    }
+
+    if (kid_len != ctx->kid_len || memcmp(kid, ctx->kid, kid_len) != 0) {
+        ogs_error("EDHOC: unknown kid in ID_CRED_I [len=%zu]", kid_len);
+        return -1;
+    }
+
+    /* Demo resolver: one local kid->credential mapping.
+     * FIXME: replace this local mapping with UDM/UDR subscriber credential lookup. */
     return credential_new_symmetric(cred_out, ctx->cred, ctx->cred_len);
 }
 
@@ -304,8 +360,18 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                 memset(&ead_3, 0, sizeof(ead_3));
                 memset(&id_cred_i, 0, sizeof(id_cred_i));
                 memset(&resolver_ctx, 0, sizeof(resolver_ctx));
-                resolver_ctx.cred = edhoc_psk_cred_i;
-                resolver_ctx.cred_len = sizeof(edhoc_psk_cred_i);
+                if (ausf_ue->edhoc_kid_len && ausf_ue->edhoc_cred_i_len) {
+                    resolver_ctx.kid = ausf_ue->edhoc_kid;
+                    resolver_ctx.kid_len = ausf_ue->edhoc_kid_len;
+                    resolver_ctx.cred = ausf_ue->edhoc_cred_i;
+                    resolver_ctx.cred_len = ausf_ue->edhoc_cred_i_len;
+                } else {
+                    /* Backward-compatible fallback while UDM payload mapping is phased in. */
+                    resolver_ctx.kid = (const uint8_t *)"\x10";
+                    resolver_ctx.kid_len = 1;
+                    resolver_ctx.cred = edhoc_psk_cred_i;
+                    resolver_ctx.cred_len = sizeof(edhoc_psk_cred_i);
+                }
                 if (message_from_ue.len < 1) {
                     ausf_ue->auth_result =
                         OpenAPI_auth_result_AUTHENTICATION_FAILURE;
