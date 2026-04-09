@@ -20,6 +20,30 @@
 #include "nudr-handler.h"
 #include "sbi-path.h"
 
+static bool edhoc_set_vector_from_subscription(
+    const OpenAPI_authentication_subscription_t *subscription,
+    OpenAPI_authentication_vector_t *vector)
+{
+    ogs_assert(vector);
+
+    if (!subscription || !subscription->edhoc_kid ||
+        !subscription->edhoc_cred_i_ccs_psk_hex) {
+        return false;
+    }
+
+    if (strlen(subscription->edhoc_kid) == 0 ||
+        strlen(subscription->edhoc_cred_i_ccs_psk_hex) == 0) {
+        return false;
+    }
+
+    vector->av_type = OpenAPI_av_type_5G_HE_AKA;
+    vector->rand = subscription->edhoc_kid; /* carrier for KID (hex) */
+    vector->autn = (char *)"00"; /* one-byte filler to satisfy AUSF checks */
+    vector->kausf = subscription->edhoc_cred_i_ccs_psk_hex; /* carrier CRED_I */
+
+    return true;
+}
+
 bool udm_nudr_dr_handle_subscription_authentication(
     udm_ue_t *udm_ue, ogs_sbi_stream_t *stream, ogs_sbi_message_t *recvmsg)
 {
@@ -48,15 +72,6 @@ bool udm_nudr_dr_handle_subscription_authentication(
 #endif
     static int step = 0;
 #endif
-
-    /* Temporary EDHOC carrier values returned to AUSF in AuthenticationVector:
-     * rand  -> kid (hex)
-     * kausf -> CRED_I CCS_PSK bytes (hex)
-     * FIXME: source these per-subscriber values from UDR/Mongo data. */
-    static const char *edhoc_kid_hex = "10";
-    static const char *edhoc_cred_i_hex =
-        "A20269696E69746961746F7208A101A30104024110205050930FF462A77A3540CF546325DEA214";
-    static const char *edhoc_autn_hex = "00";
 
     uint8_t autn[OGS_AUTN_LEN];
     uint8_t ik[OGS_KEY_LEN];
@@ -145,10 +160,18 @@ bool udm_nudr_dr_handle_subscription_authentication(
 
                 AuthenticationInfoResult.supi = udm_ue->supi;
                 AuthenticationInfoResult.auth_type = udm_ue->auth_type;
-                AuthenticationVector.av_type = OpenAPI_av_type_5G_HE_AKA;
-                AuthenticationVector.rand = (char *)edhoc_kid_hex;
-                AuthenticationVector.autn = (char *)edhoc_autn_hex;
-                AuthenticationVector.kausf = (char *)edhoc_cred_i_hex;
+                if (!edhoc_set_vector_from_subscription(
+                            AuthenticationSubscription, &AuthenticationVector)) {
+                    ogs_error("[%s] Missing or invalid edhoc_credentials in AuthenticationSubscription",
+                            udm_ue->suci);
+                    ogs_assert(true ==
+                        ogs_sbi_server_send_error(stream,
+                            OGS_SBI_HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                            recvmsg,
+                            "Missing or invalid edhoc_credentials",
+                            udm_ue->suci, NULL));
+                    return false;
+                }
                 AuthenticationInfoResult.authentication_vector =
                     &AuthenticationVector;
 
@@ -157,7 +180,7 @@ bool udm_nudr_dr_handle_subscription_authentication(
                 ogs_assert(AuthenticationInfoResult.auth_type);
                 sendmsg.AuthenticationInfoResult = &AuthenticationInfoResult;
 
-                ogs_info("EDHOC: UDM returning kid/credential carrier for UE[%s]",
+                ogs_info("EDHOC: UDM returning subscriber kid/credential for UE[%s]",
                         udm_ue->suci);
 
                 response = ogs_sbi_build_response(
@@ -257,10 +280,18 @@ bool udm_nudr_dr_handle_subscription_authentication(
 
             if (udm_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
                 memset(&AuthenticationVector, 0, sizeof(AuthenticationVector));
-                AuthenticationVector.av_type = OpenAPI_av_type_5G_HE_AKA;
-                AuthenticationVector.rand = (char *)edhoc_kid_hex;
-                AuthenticationVector.autn = (char *)edhoc_autn_hex;
-                AuthenticationVector.kausf = (char *)edhoc_cred_i_hex;
+                if (!edhoc_set_vector_from_subscription(
+                            AuthenticationSubscription, &AuthenticationVector)) {
+                    ogs_error("[%s] Missing or invalid edhoc_credentials in AuthenticationSubscription",
+                            udm_ue->suci);
+                    ogs_assert(true ==
+                        ogs_sbi_server_send_error(stream,
+                            OGS_SBI_HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                            recvmsg,
+                            "Missing or invalid edhoc_credentials",
+                            udm_ue->suci, NULL));
+                    return false;
+                }
                 AuthenticationInfoResult.authentication_vector =
                     &AuthenticationVector;
 

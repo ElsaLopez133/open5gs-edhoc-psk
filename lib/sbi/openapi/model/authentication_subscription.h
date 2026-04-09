@@ -39,6 +39,9 @@ typedef struct OpenAPI_authentication_subscription_s {
     bool is_akma_allowed;
     int akma_allowed;
     char *routing_id;
+    /* Open5GS extension used by EDHOC-PSK prototype */
+    char *edhoc_kid;
+    char *edhoc_cred_i_ccs_psk_hex;
 } OpenAPI_authentication_subscription_t;
 
 OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_create(
@@ -59,7 +62,9 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_creat
     char *supi,
     bool is_akma_allowed,
     int akma_allowed,
-    char *routing_id
+    char *routing_id,
+    char *edhoc_kid,
+    char *edhoc_cred_i_ccs_psk_hex
 );
 void OpenAPI_authentication_subscription_free(OpenAPI_authentication_subscription_t *authentication_subscription);
 OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_parseFromJSON(cJSON *authentication_subscriptionJSON);
@@ -71,4 +76,3 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_copy(
 #endif
 
 #endif /* _OpenAPI_authentication_subscription_H_ */
-

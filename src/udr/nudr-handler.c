@@ -104,6 +104,21 @@ bool udr_nudr_dr_handle_subscription_authentication(
             memset(&SequenceNumber, 0, sizeof(SequenceNumber));
             SequenceNumber.sqn = sqn_string;
             AuthenticationSubscription.sequence_number = &SequenceNumber;
+            AuthenticationSubscription.edhoc_kid = auth_info.edhoc_kid_hex;
+            AuthenticationSubscription.edhoc_cred_i_ccs_psk_hex =
+                auth_info.edhoc_cred_i_ccs_psk_hex;
+
+            if (AuthenticationSubscription.authentication_method ==
+                    OpenAPI_auth_method_EDHOC_PSK &&
+                (!AuthenticationSubscription.edhoc_kid[0] ||
+                 !AuthenticationSubscription.edhoc_cred_i_ccs_psk_hex[0])) {
+                ogs_error("[%s] Missing edhoc_credentials in subscriber DB document", supi);
+                ogs_assert(true ==
+                    ogs_sbi_server_send_error(stream,
+                        OGS_SBI_HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                        recvmsg, "Missing edhoc_credentials", supi, NULL));
+                return false;
+            }
 
             memset(&sendmsg, 0, sizeof(sendmsg));
 
