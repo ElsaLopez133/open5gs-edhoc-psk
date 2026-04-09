@@ -258,24 +258,24 @@ int amf_nausf_auth_handle_authenticate_confirmation(
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
         amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_ONGOING) {
         int r;
-        /* Ongoing EDHOC leg: AMF receives tunneled message_2 from AUSF (N12),
-         * stores raw bytes, then triggers a second NAS Authentication Request (N1). */
+        /* Ongoing EDHOC leg: AMF receives tunneled EDHOC payload (message_2/message_4)
+         * from AUSF (N12), stores raw bytes, then triggers NAS Authentication Request (N1). */
 
         if (!ConfirmationDataResponse->kseaf) {
-            ogs_error("[%s] No tunneled EDHOC message_2", amf_ue->suci);
+            ogs_error("[%s] No tunneled EDHOC payload", amf_ue->suci);
             return OGS_ERROR;
         }
 
         payload_len = strlen(ConfirmationDataResponse->kseaf);
         if (payload_len == 0 || (payload_len % 2) != 0) {
-            ogs_error("[%s] Invalid tunneled EDHOC message_2 length [%d]",
+            ogs_error("[%s] Invalid tunneled EDHOC payload length [%d]",
                     amf_ue->suci, payload_len);
             return OGS_ERROR;
         }
 
         payload_len /= 2;
         if (payload_len > (int)sizeof(amf_ue->edhoc_eap_payload)) {
-            ogs_error("[%s] Tunneled EDHOC message_2 too large [%d]",
+            ogs_error("[%s] Tunneled EDHOC payload too large [%d]",
                     amf_ue->suci, payload_len);
             return OGS_ERROR;
         }
@@ -285,7 +285,7 @@ int amf_nausf_auth_handle_authenticate_confirmation(
                 amf_ue->edhoc_eap_payload, sizeof(amf_ue->edhoc_eap_payload));
         amf_ue->edhoc_eap_payload_len = payload_len;
 
-        ogs_info("EDHOC: relaying message_2 to UE[%s] [%d bytes EAP]",
+        ogs_info("EDHOC: relaying EDHOC payload to UE[%s] [%d bytes EAP]",
                 amf_ue->suci ? amf_ue->suci : "(unknown)", payload_len);
 
         r = nas_5gs_send_authentication_request(amf_ue);

@@ -230,6 +230,7 @@ bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
     ausf_ue->serving_network_name = ogs_strdup(serving_network_name);
     ogs_assert(ausf_ue->serving_network_name);
     ausf_ue->edhoc_in_progress = false;
+    ausf_ue->edhoc_waiting_message4_ack = false;
     memset(&ausf_ue->edhoc_responder, 0, sizeof(ausf_ue->edhoc_responder));
     ausf_ue->edhoc_c_i = 0;
     ausf_ue->edhoc_c_r = 0;
@@ -280,16 +281,21 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
     if (ausf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
         EdhocMessageBuffer message_from_ue;
         EdhocMessageBuffer message_2;
+        EdhocMessageBuffer message_4;
         CredentialC cred_r;
         EadItemsC ead_1;
         EadItemsC ead_2;
         EadItemsC ead_3;
+        EadItemsC ead_4;
         IdCred id_cred_i;
+        CredentialC cred_i_expected;
+        uint8_t prk_out[SHA256_DIGEST_LEN];
         edhoc_cred_resolver_ctx_t resolver_ctx;
         uint8_t c_i = 0;
         uint8_t c_r = 0;
         uint8_t eap_id = 0;
         char *message_2_hex = NULL;
+        char *message_4_hex = NULL;
         int8_t edhoc_rc;
 
         if (!edhoc_extract_message_from_eap(
@@ -330,6 +336,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                             ausf_ue->suci, edhoc_rc);
                 } else {
                     ausf_ue->edhoc_in_progress = true;
+                    ausf_ue->edhoc_waiting_message4_ack = false;
                     ausf_ue->edhoc_c_i = c_i;
                     ausf_ue->edhoc_c_r = c_r;
 
@@ -354,11 +361,15 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                     ogs_free(message_2_hex);
                     return true;
                 }
-            } else {
-                /* Second EDHOC leg: parse message_3 using resolver-based lookup
-                 * for ByReference ID_CRED_PSK. */
+            } else if (!ausf_ue->edhoc_waiting_message4_ack) {
+                /* Second EDHOC leg: parse message_3 and generate message_4.
+                 * message_4 is relayed in AUTHENTICATION_ONGOING. */
                 memset(&ead_3, 0, sizeof(ead_3));
+                memset(&ead_4, 0, sizeof(ead_4));
+                memset(&message_4, 0, sizeof(message_4));
                 memset(&id_cred_i, 0, sizeof(id_cred_i));
+                memset(&cred_i_expected, 0, sizeof(cred_i_expected));
+                memset(prk_out, 0, sizeof(prk_out));
                 memset(&resolver_ctx, 0, sizeof(resolver_ctx));
                 if (ausf_ue->edhoc_kid_len && ausf_ue->edhoc_cred_i_len) {
                     resolver_ctx.kid = ausf_ue->edhoc_kid;
@@ -388,12 +399,70 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                         ogs_error("EDHOC: failed to parse message_3 for UE[%s] [rc=%d]",
                                 ausf_ue->suci, edhoc_rc);
                     } else {
+                        edhoc_rc = credential_new_symmetric(
+                                &cred_i_expected,
+                                resolver_ctx.cred, resolver_ctx.cred_len);
+                        if (edhoc_rc == 0)
+                            edhoc_rc = responder_verify_message_3(
+                                    &ausf_ue->edhoc_responder,
+                                    &cred_i_expected, &prk_out);
+                        if (edhoc_rc == 0)
+                            edhoc_rc = responder_prepare_message_4(
+                                &ausf_ue->edhoc_responder, &ead_4, &message_4);
+                        if (edhoc_rc == 0)
+                            edhoc_rc = edhoc_build_eap_request_hex(
+                                    (uint8_t)(eap_id + 1),
+                                    &message_4, &message_4_hex) ? 0 : -1;
+
+                        if (edhoc_rc == 0) {
+                            memset(&ConfirmationDataResponse, 0,
+                                    sizeof(ConfirmationDataResponse));
+                            ConfirmationDataResponse.auth_result =
+                                OpenAPI_auth_result_AUTHENTICATION_ONGOING;
+                            ConfirmationDataResponse.kseaf = message_4_hex;
+                            ConfirmationDataResponse.supi = ausf_ue->supi;
+
+                            memset(&sendmsg, 0, sizeof(sendmsg));
+                            sendmsg.ConfirmationDataResponse =
+                                &ConfirmationDataResponse;
+
+                            response = ogs_sbi_build_response(
+                                    &sendmsg, OGS_SBI_HTTP_STATUS_OK);
+                            ogs_assert(response);
+                            ogs_assert(true == ogs_sbi_server_send_response(
+                                        stream, response));
+
+                            ausf_ue->edhoc_waiting_message4_ack = true;
+                            ogs_info("EDHOC: generated message_4 for UE[%s] [m3_len=%zu,m4_len=%zu]",
+                                    ausf_ue->suci, (size_t)message_from_ue.len,
+                                    (size_t)message_4.len);
+                            ogs_free(message_4_hex);
+                            return true;
+                        }
+
                         ausf_ue->auth_result =
-                            OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
-                        ausf_ue->edhoc_in_progress = false;
+                            OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                        ogs_error("EDHOC: failed to generate message_4 for UE[%s] [rc=%d]",
+                                ausf_ue->suci, edhoc_rc);
                         ogs_info("EDHOC: parsed message_3 for UE[%s] [len=%zu]",
                                 ausf_ue->suci, (size_t)message_from_ue.len);
                     }
+                }
+            } else {
+                /* Third EDHOC leg: UE acknowledges message_4 relay.
+                 * Currently treated as transport-level completion trigger. */
+                if (message_from_ue.len == 0) {
+                    ausf_ue->auth_result =
+                        OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                    ogs_error("EDHOC: empty post-message_4 response for UE[%s]",
+                            ausf_ue->suci);
+                } else {
+                    ausf_ue->auth_result =
+                        OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
+                    ausf_ue->edhoc_in_progress = false;
+                    ausf_ue->edhoc_waiting_message4_ack = false;
+                    ogs_info("EDHOC: post-message_4 response accepted for UE[%s] [len=%zu]",
+                            ausf_ue->suci, (size_t)message_from_ue.len);
                 }
             }
         }
