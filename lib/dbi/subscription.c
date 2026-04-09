@@ -28,6 +28,9 @@ int ogs_dbi_auth_info(char *supi, ogs_dbi_auth_info_t *auth_info)
     const bson_t *document;
     bson_iter_t iter;
     bson_iter_t inner_iter;
+    bson_iter_t array_iter;
+    bson_iter_t cred_iter;
+    bson_iter_t cred_inner_iter;
     char buf[OGS_KEY_LEN];
     char *utf8 = NULL;
     uint32_t length = 0;
@@ -113,6 +116,42 @@ int ogs_dbi_auth_info(char *supi, ogs_dbi_auth_info_t *auth_info)
         } else if (!strcmp(key, OGS_SQN_STRING) &&
                 BSON_ITER_HOLDS_INT64(&inner_iter)) {
             auth_info->sqn = bson_iter_int64(&inner_iter);
+        }
+    }
+
+    if (bson_iter_init_find(&array_iter, document, "edhoc_credentials") &&
+        BSON_ITER_HOLDS_ARRAY(&array_iter)) {
+        const uint8_t *array_data = NULL;
+        uint32_t array_len = 0;
+        bson_t array_bson;
+
+        bson_iter_array(&array_iter, &array_len, &array_data);
+        if (bson_init_static(&array_bson, array_data, array_len) &&
+            bson_iter_init(&cred_iter, &array_bson) &&
+            bson_iter_next(&cred_iter) &&
+            BSON_ITER_HOLDS_DOCUMENT(&cred_iter)) {
+            const uint8_t *cred_doc_data = NULL;
+            uint32_t cred_doc_len = 0;
+            bson_t cred_doc_bson;
+
+            bson_iter_document(&cred_iter, &cred_doc_len, &cred_doc_data);
+            if (bson_init_static(&cred_doc_bson, cred_doc_data, cred_doc_len) &&
+                bson_iter_init(&cred_inner_iter, &cred_doc_bson)) {
+                while (bson_iter_next(&cred_inner_iter)) {
+                    const char *key = bson_iter_key(&cred_inner_iter);
+                    if (!strcmp(key, "kid") &&
+                        BSON_ITER_HOLDS_UTF8(&cred_inner_iter)) {
+                        utf8 = (char *)bson_iter_utf8(&cred_inner_iter, &length);
+                        ogs_cpystrn(auth_info->edhoc_kid_hex, utf8,
+                            sizeof(auth_info->edhoc_kid_hex));
+                    } else if (!strcmp(key, "cred_i_ccs_psk_hex") &&
+                            BSON_ITER_HOLDS_UTF8(&cred_inner_iter)) {
+                        utf8 = (char *)bson_iter_utf8(&cred_inner_iter, &length);
+                        ogs_cpystrn(auth_info->edhoc_cred_i_ccs_psk_hex, utf8,
+                            sizeof(auth_info->edhoc_cred_i_ccs_psk_hex));
+                    }
+                }
+            }
         }
     }
 

@@ -28,6 +28,9 @@
 extern "C" {
 #endif
 
+#define OGS_DBI_EDHOC_KID_HEX_LEN 64
+#define OGS_DBI_EDHOC_CRED_HEX_LEN 2048
+
 typedef struct ogs_dbi_auth_info_s {
     uint8_t       k[OGS_KEY_LEN];
     uint8_t       use_opc;
@@ -36,6 +39,8 @@ typedef struct ogs_dbi_auth_info_s {
     uint8_t       amf[OGS_AMF_LEN];
     uint8_t       rand[OGS_RAND_LEN];
     uint64_t      sqn;
+    char          edhoc_kid_hex[OGS_DBI_EDHOC_KID_HEX_LEN + 1];
+    char          edhoc_cred_i_ccs_psk_hex[OGS_DBI_EDHOC_CRED_HEX_LEN + 1];
 } ogs_dbi_auth_info_t;
 
 int ogs_dbi_auth_info(char *supi, ogs_dbi_auth_info_t *auth_info);

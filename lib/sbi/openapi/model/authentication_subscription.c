@@ -22,7 +22,9 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_creat
     char *supi,
     bool is_akma_allowed,
     int akma_allowed,
-    char *routing_id
+    char *routing_id,
+    char *edhoc_kid,
+    char *edhoc_cred_i_ccs_psk_hex
 )
 {
     OpenAPI_authentication_subscription_t *authentication_subscription_local_var = ogs_malloc(sizeof(OpenAPI_authentication_subscription_t));
@@ -46,6 +48,9 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_creat
     authentication_subscription_local_var->is_akma_allowed = is_akma_allowed;
     authentication_subscription_local_var->akma_allowed = akma_allowed;
     authentication_subscription_local_var->routing_id = routing_id;
+    authentication_subscription_local_var->edhoc_kid = edhoc_kid;
+    authentication_subscription_local_var->edhoc_cred_i_ccs_psk_hex =
+        edhoc_cred_i_ccs_psk_hex;
 
     return authentication_subscription_local_var;
 }
@@ -96,6 +101,14 @@ void OpenAPI_authentication_subscription_free(OpenAPI_authentication_subscriptio
     if (authentication_subscription->routing_id) {
         ogs_free(authentication_subscription->routing_id);
         authentication_subscription->routing_id = NULL;
+    }
+    if (authentication_subscription->edhoc_kid) {
+        ogs_free(authentication_subscription->edhoc_kid);
+        authentication_subscription->edhoc_kid = NULL;
+    }
+    if (authentication_subscription->edhoc_cred_i_ccs_psk_hex) {
+        ogs_free(authentication_subscription->edhoc_cred_i_ccs_psk_hex);
+        authentication_subscription->edhoc_cred_i_ccs_psk_hex = NULL;
     }
     ogs_free(authentication_subscription);
 }
@@ -223,6 +236,35 @@ cJSON *OpenAPI_authentication_subscription_convertToJSON(OpenAPI_authentication_
         goto end;
     }
     }
+    if (authentication_subscription->edhoc_kid ||
+        authentication_subscription->edhoc_cred_i_ccs_psk_hex) {
+        cJSON *edhoc_credentials = cJSON_AddArrayToObject(item, "edhoc_credentials");
+        cJSON *edhoc_entry = NULL;
+        if (!edhoc_credentials) {
+            ogs_error("OpenAPI_authentication_subscription_convertToJSON() failed [edhoc_credentials]");
+            goto end;
+        }
+
+        edhoc_entry = cJSON_CreateObject();
+        if (!edhoc_entry) {
+            ogs_error("OpenAPI_authentication_subscription_convertToJSON() failed [edhoc_entry]");
+            goto end;
+        }
+        cJSON_AddItemToArray(edhoc_credentials, edhoc_entry);
+
+        if (authentication_subscription->edhoc_kid &&
+            cJSON_AddStringToObject(edhoc_entry, "kid",
+                authentication_subscription->edhoc_kid) == NULL) {
+            ogs_error("OpenAPI_authentication_subscription_convertToJSON() failed [edhoc_kid]");
+            goto end;
+        }
+        if (authentication_subscription->edhoc_cred_i_ccs_psk_hex &&
+            cJSON_AddStringToObject(edhoc_entry, "cred_i_ccs_psk_hex",
+                authentication_subscription->edhoc_cred_i_ccs_psk_hex) == NULL) {
+            ogs_error("OpenAPI_authentication_subscription_convertToJSON() failed [edhoc_cred_i_ccs_psk_hex]");
+            goto end;
+        }
+    }
 
 end:
     return item;
@@ -250,6 +292,10 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_parse
     cJSON *supi = NULL;
     cJSON *akma_allowed = NULL;
     cJSON *routing_id = NULL;
+    cJSON *edhoc_credentials = NULL;
+    cJSON *edhoc_credentials_0 = NULL;
+    cJSON *edhoc_kid = NULL;
+    cJSON *edhoc_cred_i_ccs_psk_hex = NULL;
     authentication_method = cJSON_GetObjectItemCaseSensitive(authentication_subscriptionJSON, "authenticationMethod");
     if (!authentication_method) {
         ogs_error("OpenAPI_authentication_subscription_parseFromJSON() failed [authentication_method]");
@@ -375,6 +421,39 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_parse
     }
     }
 
+    edhoc_credentials = cJSON_GetObjectItemCaseSensitive(
+            authentication_subscriptionJSON, "edhoc_credentials");
+    if (edhoc_credentials) {
+        if (!cJSON_IsArray(edhoc_credentials)) {
+            ogs_error("OpenAPI_authentication_subscription_parseFromJSON() failed [edhoc_credentials]");
+            goto end;
+        }
+
+        edhoc_credentials_0 = cJSON_GetArrayItem(edhoc_credentials, 0);
+        if (edhoc_credentials_0) {
+            if (!cJSON_IsObject(edhoc_credentials_0)) {
+                ogs_error("OpenAPI_authentication_subscription_parseFromJSON() failed [edhoc_credentials_0]");
+                goto end;
+            }
+
+            edhoc_kid = cJSON_GetObjectItemCaseSensitive(edhoc_credentials_0, "kid");
+            if (edhoc_kid &&
+                (!cJSON_IsString(edhoc_kid) || cJSON_IsNull(edhoc_kid))) {
+                ogs_error("OpenAPI_authentication_subscription_parseFromJSON() failed [edhoc_kid]");
+                goto end;
+            }
+
+            edhoc_cred_i_ccs_psk_hex = cJSON_GetObjectItemCaseSensitive(
+                    edhoc_credentials_0, "cred_i_ccs_psk_hex");
+            if (edhoc_cred_i_ccs_psk_hex &&
+                (!cJSON_IsString(edhoc_cred_i_ccs_psk_hex) ||
+                 cJSON_IsNull(edhoc_cred_i_ccs_psk_hex))) {
+                ogs_error("OpenAPI_authentication_subscription_parseFromJSON() failed [edhoc_cred_i_ccs_psk_hex]");
+                goto end;
+            }
+        }
+    }
+
     authentication_subscription_local_var = OpenAPI_authentication_subscription_create (
         authentication_methodVariable,
         enc_permanent_key && !cJSON_IsNull(enc_permanent_key) ? ogs_strdup(enc_permanent_key->valuestring) : NULL,
@@ -393,7 +472,10 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_parse
         supi && !cJSON_IsNull(supi) ? ogs_strdup(supi->valuestring) : NULL,
         akma_allowed ? true : false,
         akma_allowed ? akma_allowed->valueint : 0,
-        routing_id && !cJSON_IsNull(routing_id) ? ogs_strdup(routing_id->valuestring) : NULL
+        routing_id && !cJSON_IsNull(routing_id) ? ogs_strdup(routing_id->valuestring) : NULL,
+        edhoc_kid && !cJSON_IsNull(edhoc_kid) ? ogs_strdup(edhoc_kid->valuestring) : NULL,
+        edhoc_cred_i_ccs_psk_hex && !cJSON_IsNull(edhoc_cred_i_ccs_psk_hex) ?
+            ogs_strdup(edhoc_cred_i_ccs_psk_hex->valuestring) : NULL
     );
 
     return authentication_subscription_local_var;
@@ -438,4 +520,3 @@ OpenAPI_authentication_subscription_t *OpenAPI_authentication_subscription_copy(
 
     return dst;
 }
-
