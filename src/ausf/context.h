@@ -76,6 +76,7 @@ struct ausf_ue_s {
     OpenAPI_auth_result_e auth_result;
     /* EDHOC responder session state kept across message_1/message_3 SBI calls. */
     bool edhoc_in_progress;
+    bool edhoc_waiting_message4_ack;
     EdhocResponder edhoc_responder;
     uint8_t edhoc_c_i;
     uint8_t edhoc_c_r;
