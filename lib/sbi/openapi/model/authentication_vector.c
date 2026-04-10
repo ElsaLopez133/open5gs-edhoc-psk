@@ -12,7 +12,9 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_create(
     char *ck_prime,
     char *ik_prime,
     char *xres_star,
-    char *kausf
+    char *kausf,
+    char *edhoc_kid,
+    char *edhoc_cred_i_ccs_psk_hex
 )
 {
     OpenAPI_authentication_vector_t *authentication_vector_local_var = ogs_malloc(sizeof(OpenAPI_authentication_vector_t));
@@ -26,6 +28,9 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_create(
     authentication_vector_local_var->ik_prime = ik_prime;
     authentication_vector_local_var->xres_star = xres_star;
     authentication_vector_local_var->kausf = kausf;
+    authentication_vector_local_var->edhoc_kid = edhoc_kid;
+    authentication_vector_local_var->edhoc_cred_i_ccs_psk_hex =
+        edhoc_cred_i_ccs_psk_hex;
 
     return authentication_vector_local_var;
 }
@@ -64,6 +69,14 @@ void OpenAPI_authentication_vector_free(OpenAPI_authentication_vector_t *authent
     if (authentication_vector->kausf) {
         ogs_free(authentication_vector->kausf);
         authentication_vector->kausf = NULL;
+    }
+    if (authentication_vector->edhoc_kid) {
+        ogs_free(authentication_vector->edhoc_kid);
+        authentication_vector->edhoc_kid = NULL;
+    }
+    if (authentication_vector->edhoc_cred_i_ccs_psk_hex) {
+        ogs_free(authentication_vector->edhoc_cred_i_ccs_psk_hex);
+        authentication_vector->edhoc_cred_i_ccs_psk_hex = NULL;
     }
     ogs_free(authentication_vector);
 }
@@ -140,6 +153,18 @@ cJSON *OpenAPI_authentication_vector_convertToJSON(OpenAPI_authentication_vector
         goto end;
     }
     }
+    if (authentication_vector->edhoc_kid) {
+    if (cJSON_AddStringToObject(item, "edhocKid", authentication_vector->edhoc_kid) == NULL) {
+        ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [edhoc_kid]");
+        goto end;
+    }
+    }
+    if (authentication_vector->edhoc_cred_i_ccs_psk_hex) {
+    if (cJSON_AddStringToObject(item, "edhocCredICcsPskHex", authentication_vector->edhoc_cred_i_ccs_psk_hex) == NULL) {
+        ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [edhoc_cred_i_ccs_psk_hex]");
+        goto end;
+    }
+    }
 
 end:
     return item;
@@ -158,6 +183,8 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_parseFromJSON(cJS
     cJSON *ik_prime = NULL;
     cJSON *xres_star = NULL;
     cJSON *kausf = NULL;
+    cJSON *edhoc_kid = NULL;
+    cJSON *edhoc_cred_i_ccs_psk_hex = NULL;
     av_type = cJSON_GetObjectItemCaseSensitive(authentication_vectorJSON, "avType");
     if (!av_type) {
         ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [av_type]");
@@ -228,6 +255,20 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_parseFromJSON(cJS
         goto end;
     }
     }
+    edhoc_kid = cJSON_GetObjectItemCaseSensitive(authentication_vectorJSON, "edhocKid");
+    if (edhoc_kid) {
+    if (!cJSON_IsString(edhoc_kid) && !cJSON_IsNull(edhoc_kid)) {
+        ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [edhoc_kid]");
+        goto end;
+    }
+    }
+    edhoc_cred_i_ccs_psk_hex = cJSON_GetObjectItemCaseSensitive(authentication_vectorJSON, "edhocCredICcsPskHex");
+    if (edhoc_cred_i_ccs_psk_hex) {
+    if (!cJSON_IsString(edhoc_cred_i_ccs_psk_hex) && !cJSON_IsNull(edhoc_cred_i_ccs_psk_hex)) {
+        ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [edhoc_cred_i_ccs_psk_hex]");
+        goto end;
+    }
+    }
 
     authentication_vector_local_var = OpenAPI_authentication_vector_create (
         av_typeVariable,
@@ -237,7 +278,10 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_parseFromJSON(cJS
         ck_prime && !cJSON_IsNull(ck_prime) ? ogs_strdup(ck_prime->valuestring) : NULL,
         ik_prime && !cJSON_IsNull(ik_prime) ? ogs_strdup(ik_prime->valuestring) : NULL,
         xres_star && !cJSON_IsNull(xres_star) ? ogs_strdup(xres_star->valuestring) : NULL,
-        kausf && !cJSON_IsNull(kausf) ? ogs_strdup(kausf->valuestring) : NULL
+        kausf && !cJSON_IsNull(kausf) ? ogs_strdup(kausf->valuestring) : NULL,
+        edhoc_kid && !cJSON_IsNull(edhoc_kid) ? ogs_strdup(edhoc_kid->valuestring) : NULL,
+        edhoc_cred_i_ccs_psk_hex && !cJSON_IsNull(edhoc_cred_i_ccs_psk_hex) ?
+            ogs_strdup(edhoc_cred_i_ccs_psk_hex->valuestring) : NULL
     );
 
     return authentication_vector_local_var;
@@ -278,4 +322,3 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_copy(OpenAPI_auth
 
     return dst;
 }
-

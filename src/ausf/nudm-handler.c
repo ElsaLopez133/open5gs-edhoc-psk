@@ -19,13 +19,6 @@
 
 #include "nudm-handler.h"
 
-static const uint8_t edhoc_dummy_kausf_seed[OGS_SHA256_DIGEST_SIZE] = {
-    0x45, 0x44, 0x48, 0x4f, 0x43, 0x5f, 0x50, 0x53,
-    0x4b, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x01,
-    0x45, 0x44, 0x48, 0x4f, 0x43, 0x5f, 0x50, 0x53,
-    0x4b, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x02,
-};
-
 static bool edhoc_store_hex_blob(
         const char *hex, uint8_t *out, size_t out_len, size_t *stored_len)
 {
@@ -250,34 +243,45 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
             strlen(AuthenticationVector->kausf),
             ausf_ue->kausf, sizeof(ausf_ue->kausf));
     } else {
-        ausf_ue->edhoc_kid_len = 0;
-        ausf_ue->edhoc_cred_i_len = 0;
-        if (AuthenticationVector && AuthenticationVector->rand &&
-            AuthenticationVector->kausf) {
-            if (!edhoc_store_hex_blob(AuthenticationVector->rand,
-                        ausf_ue->edhoc_kid, sizeof(ausf_ue->edhoc_kid),
-                        &ausf_ue->edhoc_kid_len) ||
-                !edhoc_store_hex_blob(AuthenticationVector->kausf,
-                        ausf_ue->edhoc_cred_i, sizeof(ausf_ue->edhoc_cred_i),
-                        &ausf_ue->edhoc_cred_i_len)) {
-                ogs_error("[%s] Invalid EDHOC credential carrier from UDM",
+        ausf_ue->edhoc_cred_i.kid_len = 0;
+        ausf_ue->edhoc_cred_i.cred_i_len = 0;
+        if (AuthenticationVector && AuthenticationVector->edhoc_kid &&
+            AuthenticationVector->edhoc_cred_i_ccs_psk_hex) {
+            if (!edhoc_store_hex_blob(AuthenticationVector->edhoc_kid,
+                        ausf_ue->edhoc_cred_i.kid,
+                        sizeof(ausf_ue->edhoc_cred_i.kid),
+                        &ausf_ue->edhoc_cred_i.kid_len) ||
+                !edhoc_store_hex_blob(
+                        AuthenticationVector->edhoc_cred_i_ccs_psk_hex,
+                        ausf_ue->edhoc_cred_i.cred_i,
+                        sizeof(ausf_ue->edhoc_cred_i.cred_i),
+                        &ausf_ue->edhoc_cred_i.cred_i_len)) {
+                ogs_error("[%s] Invalid EDHOC credential data from UDM",
                         ausf_ue->suci);
                 ogs_assert(true ==
                     ogs_sbi_server_send_error(stream,
                         OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                        recvmsg, "Invalid EDHOC credential carrier",
+                        recvmsg, "Invalid EDHOC credential data",
                         ausf_ue->suci, NULL));
                 return false;
             }
             ogs_info("EDHOC: loaded kid/credential from UDM for UE[%s] [kid_len=%zu,cred_len=%zu]",
                     ausf_ue->suci,
-                    ausf_ue->edhoc_kid_len, ausf_ue->edhoc_cred_i_len);
+                    ausf_ue->edhoc_cred_i.kid_len,
+                    ausf_ue->edhoc_cred_i.cred_i_len);
+        } else {
+            ogs_error("[%s] Missing explicit EDHOC credential fields from UDM",
+                    ausf_ue->suci);
+            ogs_assert(true ==
+                ogs_sbi_server_send_error(stream,
+                    OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                    recvmsg, "Missing EDHOC credential data",
+                    ausf_ue->suci, NULL));
+            return false;
         }
 
-        // There is no AKA vector, so no real K_AUSF from the standard AKA derivation.
-        // still need something in ausf_ue->kausf, because later Open5GS code expects it to exist,
-        // so I seed it with a deterministic dummy value.
-        memcpy(ausf_ue->kausf, edhoc_dummy_kausf_seed, sizeof(ausf_ue->kausf));
+        /* EDHOC derives KAUSF after successful message_3 verification. */
+        memset(ausf_ue->kausf, 0, sizeof(ausf_ue->kausf));
     }
 
     memset(&UeAuthenticationCtx, 0, sizeof(UeAuthenticationCtx));
@@ -295,11 +299,11 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
                 hxres_star_string, sizeof(hxres_star_string));
         AV5G_AKA.hxres_star = hxres_star_string;
     } else {
-        // EDHOC uses RAND/AUTN/HXRES*
-        // The response object structure expects these fields, so we populate them with inert placeholders.
-        AV5G_AKA.rand = (char *)"EDHOC-DUMMY-RAND";
-        AV5G_AKA.autn = (char *)"EDHOC-DUMMY-AUTN";
-        AV5G_AKA.hxres_star = (char *)"EDHOC-DUMMY-HXRES";
+        /* EDHOC does not use 5G-AKA challenge material, but the existing
+         * UeAuthenticationCtx schema still requires this object to be present. */
+        AV5G_AKA.rand = (char *)"00";
+        AV5G_AKA.autn = (char *)"00";
+        AV5G_AKA.hxres_star = (char *)"00";
     }
     // So even for EDHOC, the outgoing UeAuthenticationCtx still carries _5g_auth_data.
     UeAuthenticationCtx._5g_auth_data = &AV5G_AKA;

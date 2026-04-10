@@ -182,7 +182,7 @@ int amf_nausf_auth_handle_authenticate(
     if (UeAuthenticationCtx->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
         /* Clear Security Context */
         CLEAR_SECURITY_CONTEXT(amf_ue);
-        amf_ue->edhoc_eap_payload_len = 0;
+        amf_ue->edhoc_n1_relay.payload_len = 0;
 
         if (amf_ue->nas.amf.ksi < (OGS_NAS_KSI_NO_KEY_IS_AVAILABLE - 1))
             amf_ue->nas.amf.ksi++;
@@ -248,12 +248,6 @@ int amf_nausf_auth_handle_authenticate_confirmation(
         return OGS_ERROR;
     }
 
-    if (!ConfirmationDataResponse->kseaf) {
-        ogs_error("[%s] No Kseaf", amf_ue->suci);
-        return OGS_ERROR;
-    }
-    // AMF is assuming that after the chosen authentication method completes,
-    // it will receive a valid KSEAF, and from that it derives KAMF.
     amf_ue->auth_result = ConfirmationDataResponse->auth_result;
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
         amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_ONGOING) {
@@ -261,12 +255,12 @@ int amf_nausf_auth_handle_authenticate_confirmation(
         /* Ongoing EDHOC leg: AMF receives tunneled EDHOC payload (message_2/message_4)
          * from AUSF (N12), stores raw bytes, then triggers NAS Authentication Request (N1). */
 
-        if (!ConfirmationDataResponse->kseaf) {
+        if (!ConfirmationDataResponse->edhoc_eap_payload) {
             ogs_error("[%s] No tunneled EDHOC payload", amf_ue->suci);
             return OGS_ERROR;
         }
 
-        payload_len = strlen(ConfirmationDataResponse->kseaf);
+        payload_len = strlen(ConfirmationDataResponse->edhoc_eap_payload);
         if (payload_len == 0 || (payload_len % 2) != 0) {
             ogs_error("[%s] Invalid tunneled EDHOC payload length [%d]",
                     amf_ue->suci, payload_len);
@@ -274,16 +268,17 @@ int amf_nausf_auth_handle_authenticate_confirmation(
         }
 
         payload_len /= 2;
-        if (payload_len > (int)sizeof(amf_ue->edhoc_eap_payload)) {
+        if (payload_len > (int)sizeof(amf_ue->edhoc_n1_relay.payload)) {
             ogs_error("[%s] Tunneled EDHOC payload too large [%d]",
                     amf_ue->suci, payload_len);
             return OGS_ERROR;
         }
 
-        ogs_ascii_to_hex(ConfirmationDataResponse->kseaf,
-                strlen(ConfirmationDataResponse->kseaf),
-                amf_ue->edhoc_eap_payload, sizeof(amf_ue->edhoc_eap_payload));
-        amf_ue->edhoc_eap_payload_len = payload_len;
+        ogs_ascii_to_hex(ConfirmationDataResponse->edhoc_eap_payload,
+                strlen(ConfirmationDataResponse->edhoc_eap_payload),
+                amf_ue->edhoc_n1_relay.payload,
+                sizeof(amf_ue->edhoc_n1_relay.payload));
+        amf_ue->edhoc_n1_relay.payload_len = payload_len;
 
         ogs_info("EDHOC: relaying EDHOC payload to UE[%s] [%d bytes EAP]",
                 amf_ue->suci ? amf_ue->suci : "(unknown)", payload_len);
@@ -296,6 +291,10 @@ int amf_nausf_auth_handle_authenticate_confirmation(
     }
 
     if (amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_SUCCESS) {
+        if (!ConfirmationDataResponse->kseaf) {
+            ogs_error("[%s] No Kseaf", amf_ue->suci);
+            return OGS_ERROR;
+        }
 
         amf_ue_set_supi(amf_ue, ConfirmationDataResponse->supi);
         ogs_ascii_to_hex(ConfirmationDataResponse->kseaf,

@@ -8,6 +8,7 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_create(
     OpenAPI_auth_result_e auth_result,
     char *supi,
     char *kseaf,
+    char *edhoc_eap_payload,
     OpenAPI_list_t *pvs_info
 )
 {
@@ -17,6 +18,7 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_create(
     confirmation_data_response_local_var->auth_result = auth_result;
     confirmation_data_response_local_var->supi = supi;
     confirmation_data_response_local_var->kseaf = kseaf;
+    confirmation_data_response_local_var->edhoc_eap_payload = edhoc_eap_payload;
     confirmation_data_response_local_var->pvs_info = pvs_info;
 
     return confirmation_data_response_local_var;
@@ -36,6 +38,10 @@ void OpenAPI_confirmation_data_response_free(OpenAPI_confirmation_data_response_
     if (confirmation_data_response->kseaf) {
         ogs_free(confirmation_data_response->kseaf);
         confirmation_data_response->kseaf = NULL;
+    }
+    if (confirmation_data_response->edhoc_eap_payload) {
+        ogs_free(confirmation_data_response->edhoc_eap_payload);
+        confirmation_data_response->edhoc_eap_payload = NULL;
     }
     if (confirmation_data_response->pvs_info) {
         OpenAPI_list_for_each(confirmation_data_response->pvs_info, node) {
@@ -80,6 +86,12 @@ cJSON *OpenAPI_confirmation_data_response_convertToJSON(OpenAPI_confirmation_dat
         goto end;
     }
     }
+    if (confirmation_data_response->edhoc_eap_payload) {
+    if (cJSON_AddStringToObject(item, "edhocEapPayload", confirmation_data_response->edhoc_eap_payload) == NULL) {
+        ogs_error("OpenAPI_confirmation_data_response_convertToJSON() failed [edhoc_eap_payload]");
+        goto end;
+    }
+    }
 
     if (confirmation_data_response->pvs_info) {
     cJSON *pvs_infoList = cJSON_AddArrayToObject(item, "pvsInfo");
@@ -109,6 +121,7 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_parseFr
     OpenAPI_auth_result_e auth_resultVariable = 0;
     cJSON *supi = NULL;
     cJSON *kseaf = NULL;
+    cJSON *edhoc_eap_payload = NULL;
     cJSON *pvs_info = NULL;
     OpenAPI_list_t *pvs_infoList = NULL;
     auth_result = cJSON_GetObjectItemCaseSensitive(confirmation_data_responseJSON, "authResult");
@@ -134,6 +147,13 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_parseFr
     if (kseaf) {
     if (!cJSON_IsString(kseaf) && !cJSON_IsNull(kseaf)) {
         ogs_error("OpenAPI_confirmation_data_response_parseFromJSON() failed [kseaf]");
+        goto end;
+    }
+    }
+    edhoc_eap_payload = cJSON_GetObjectItemCaseSensitive(confirmation_data_responseJSON, "edhocEapPayload");
+    if (edhoc_eap_payload) {
+    if (!cJSON_IsString(edhoc_eap_payload) && !cJSON_IsNull(edhoc_eap_payload)) {
+        ogs_error("OpenAPI_confirmation_data_response_parseFromJSON() failed [edhoc_eap_payload]");
         goto end;
     }
     }
@@ -166,6 +186,7 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_parseFr
         auth_resultVariable,
         supi && !cJSON_IsNull(supi) ? ogs_strdup(supi->valuestring) : NULL,
         kseaf && !cJSON_IsNull(kseaf) ? ogs_strdup(kseaf->valuestring) : NULL,
+        edhoc_eap_payload && !cJSON_IsNull(edhoc_eap_payload) ? ogs_strdup(edhoc_eap_payload->valuestring) : NULL,
         pvs_info ? pvs_infoList : NULL
     );
 
@@ -214,4 +235,3 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_copy(Op
 
     return dst;
 }
-

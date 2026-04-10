@@ -36,13 +36,10 @@ static const uint8_t edhoc_psk_cred[] = {
     0x54, 0x63, 0x25, 0xDE, 0xA2, 0x14,
 };
 
-/* Demo initiator credential used by resolver callback for ByReference message_3. */
-static const uint8_t edhoc_psk_cred_i[] = {
-    0xA2, 0x02, 0x69, 0x69, 0x6E, 0x69, 0x74, 0x69, 0x61, 0x74, 0x6F,
-    0x72, 0x08, 0xA1, 0x01, 0xA3, 0x01, 0x04, 0x02, 0x41, 0x10, 0x20,
-    0x50, 0x50, 0x93, 0x0F, 0xF4, 0x62, 0xA7, 0x7A, 0x35, 0x40, 0xCF,
-    0x54, 0x63, 0x25, 0xDE, 0xA2, 0x14,
-};
+#define EDHOC_EAP_NOTIFICATION_TYPE 0x02
+#define EDHOC_EXPORTER_LABEL_MSK 26
+#define EDHOC_EXPORTER_LABEL_EMSK 27
+#define EDHOC_EXPORTER_KEY_LEN 64
 
 typedef struct edhoc_cred_resolver_ctx_s {
     const uint8_t *kid;
@@ -151,10 +148,10 @@ static bool edhoc_extract_message_from_eap(
         return false;
 
     /* We currently carry EDHOC in EAP Notification packets. */
-    if (payload[0] != 0x02 || payload[4] != 0x02)
+    if (payload[0] != 0x02 || payload[4] != EDHOC_EAP_NOTIFICATION_TYPE)
         return false;
 
-    if ((payload_len - 5) <= 0 ||
+    if ((payload_len - 5) < 0 ||
         (payload_len - 5) > (int)sizeof(message->content))
         return false;
 
@@ -162,7 +159,8 @@ static bool edhoc_extract_message_from_eap(
         *eap_id = payload[1];
 
     message->len = payload_len - 5;
-    memcpy(message->content, payload + 5, message->len);
+    if (message->len > 0)
+        memcpy(message->content, payload + 5, message->len);
 
     return true;
 }
@@ -186,7 +184,7 @@ static bool edhoc_build_eap_request_hex(
     eap_packet[1] = eap_id;
     eap_packet[2] = (eap_packet_len >> 8) & 0xff;
     eap_packet[3] = eap_packet_len & 0xff;
-    eap_packet[4] = 0x02; /* EAP Notification */
+    eap_packet[4] = EDHOC_EAP_NOTIFICATION_TYPE; /* EAP Notification */
     memcpy(eap_packet + 5, message->content, message->len);
 
     *hex_payload = ogs_malloc((eap_packet_len * 2) + 1);
@@ -195,6 +193,39 @@ static bool edhoc_build_eap_request_hex(
             *hex_payload, (eap_packet_len * 2) + 1);
 
     return true;
+}
+
+static int edhoc_derive_kausf_from_exporter(ausf_ue_t *ausf_ue)
+{
+    uint8_t emsk[EDHOC_EXPORTER_KEY_LEN];
+    int8_t edhoc_rc;
+
+    ogs_assert(ausf_ue);
+
+    memset(emsk, 0, sizeof(emsk));
+
+    /* This PoC runs EDHOC_PSK and only reuses EAP framing as an N1 carrier.
+     * It does not implement the standardized EAP-EDHOC method, so there is
+     * no real EAP-EDHOC type code to bind into the exporter context.
+     *
+     * For that reason the exporter context is left empty here, keeping EMSK
+     * tied to the EDHOC transcript itself rather than to the temporary EAP
+     * Notification wrapper used to relay bytes between UE and AMF/AUSF. */
+    edhoc_rc = responder_edhoc_exporter(
+            &ausf_ue->edhoc_responder,
+            EDHOC_EXPORTER_LABEL_EMSK,
+            NULL, 0,
+            emsk, sizeof(emsk));
+    if (edhoc_rc != 0) {
+        ogs_error("EDHOC: EMSK export failed for UE[%s] [rc=%d]",
+                ausf_ue->suci, edhoc_rc);
+        return OGS_ERROR;
+    }
+
+    memcpy(ausf_ue->kausf, emsk, OGS_SHA256_DIGEST_SIZE);
+
+    ogs_info("EDHOC: derived KAUSF from exporter for UE[%s]", ausf_ue->suci);
+    return OGS_OK;
 }
 bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
         ogs_sbi_stream_t *stream, ogs_sbi_message_t *recvmsg)
@@ -343,7 +374,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                     memset(&ConfirmationDataResponse, 0, sizeof(ConfirmationDataResponse));
                     ConfirmationDataResponse.auth_result =
                         OpenAPI_auth_result_AUTHENTICATION_ONGOING;
-                    ConfirmationDataResponse.kseaf = message_2_hex;
+                    ConfirmationDataResponse.edhoc_eap_payload = message_2_hex;
                     ConfirmationDataResponse.supi = ausf_ue->supi;
 
                     memset(&sendmsg, 0, sizeof(sendmsg));
@@ -371,18 +402,24 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                 memset(&cred_i_expected, 0, sizeof(cred_i_expected));
                 memset(prk_out, 0, sizeof(prk_out));
                 memset(&resolver_ctx, 0, sizeof(resolver_ctx));
-                if (ausf_ue->edhoc_kid_len && ausf_ue->edhoc_cred_i_len) {
-                    resolver_ctx.kid = ausf_ue->edhoc_kid;
-                    resolver_ctx.kid_len = ausf_ue->edhoc_kid_len;
-                    resolver_ctx.cred = ausf_ue->edhoc_cred_i;
-                    resolver_ctx.cred_len = ausf_ue->edhoc_cred_i_len;
-                } else {
-                    /* Backward-compatible fallback while UDM payload mapping is phased in. */
-                    resolver_ctx.kid = (const uint8_t *)"\x10";
-                    resolver_ctx.kid_len = 1;
-                    resolver_ctx.cred = edhoc_psk_cred_i;
-                    resolver_ctx.cred_len = sizeof(edhoc_psk_cred_i);
+                if (!ausf_ue->edhoc_cred_i.kid_len ||
+                    !ausf_ue->edhoc_cred_i.cred_i_len) {
+                    ausf_ue->auth_result =
+                        OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                    ogs_error("EDHOC: missing initiator credential data from UDM for UE[%s]",
+                            ausf_ue->suci);
+                    r = ausf_sbi_discover_and_send(
+                            OGS_SBI_SERVICE_TYPE_NUDM_UEAU, NULL,
+                            ausf_nudm_ueau_build_result_confirmation_inform,
+                            ausf_ue, stream, NULL);
+                    ogs_expect(r == OGS_OK);
+                    ogs_assert(r != OGS_ERROR);
+                    return true;
                 }
+                resolver_ctx.kid = ausf_ue->edhoc_cred_i.kid;
+                resolver_ctx.kid_len = ausf_ue->edhoc_cred_i.kid_len;
+                resolver_ctx.cred = ausf_ue->edhoc_cred_i.cred_i;
+                resolver_ctx.cred_len = ausf_ue->edhoc_cred_i.cred_i_len;
                 if (message_from_ue.len < 1) {
                     ausf_ue->auth_result =
                         OpenAPI_auth_result_AUTHENTICATION_FAILURE;
@@ -413,13 +450,16 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                             edhoc_rc = edhoc_build_eap_request_hex(
                                     (uint8_t)(eap_id + 1),
                                     &message_4, &message_4_hex) ? 0 : -1;
+                        if (edhoc_rc == 0)
+                            edhoc_rc = edhoc_derive_kausf_from_exporter(
+                                    ausf_ue) == OGS_OK ? 0 : -1;
 
                         if (edhoc_rc == 0) {
                             memset(&ConfirmationDataResponse, 0,
                                     sizeof(ConfirmationDataResponse));
                             ConfirmationDataResponse.auth_result =
                                 OpenAPI_auth_result_AUTHENTICATION_ONGOING;
-                            ConfirmationDataResponse.kseaf = message_4_hex;
+                            ConfirmationDataResponse.edhoc_eap_payload = message_4_hex;
                             ConfirmationDataResponse.supi = ausf_ue->supi;
 
                             memset(&sendmsg, 0, sizeof(sendmsg));
@@ -450,18 +490,18 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                 }
             } else {
                 /* Third EDHOC leg: UE acknowledges message_4 relay.
-                 * Currently treated as transport-level completion trigger. */
+                 * An empty EAP-Response acknowledges protected success. */
                 if (message_from_ue.len == 0) {
-                    ausf_ue->auth_result =
-                        OpenAPI_auth_result_AUTHENTICATION_FAILURE;
-                    ogs_error("EDHOC: empty post-message_4 response for UE[%s]",
-                            ausf_ue->suci);
-                } else {
                     ausf_ue->auth_result =
                         OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
                     ausf_ue->edhoc_in_progress = false;
                     ausf_ue->edhoc_waiting_message4_ack = false;
-                    ogs_info("EDHOC: post-message_4 response accepted for UE[%s] [len=%zu]",
+                    ogs_info("EDHOC: received empty message_4 ACK for UE[%s]",
+                            ausf_ue->suci);
+                } else {
+                    ausf_ue->auth_result =
+                        OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                    ogs_error("EDHOC: expected empty message_4 ACK for UE[%s] [len=%zu]",
                             ausf_ue->suci, (size_t)message_from_ue.len);
                 }
             }

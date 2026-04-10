@@ -378,15 +378,15 @@ ogs_pkbuf_t *gmm_build_authentication_request(amf_ue_t *amf_ue)
          * first round sends bootstrap marker, later rounds relay message_2 bytes. */
         ogs_info("EDHOC: sending authentication request for UE[%s] [%s]",
                 amf_ue->suci ? amf_ue->suci : "(unknown)",
-                amf_ue->edhoc_eap_payload_len ? "message_2 relay" : "dummy start");
+                amf_ue->edhoc_n1_relay.payload_len ? "relay payload" : "dummy start");
         authentication_request->presencemask |=
             OGS_NAS_5GS_AUTHENTICATION_REQUEST_EAP_MESSAGE_PRESENT;
-        if (amf_ue->edhoc_eap_payload_len) {
+        if (amf_ue->edhoc_n1_relay.payload_len) {
             authentication_request->eap_message.length =
-                amf_ue->edhoc_eap_payload_len;
+                amf_ue->edhoc_n1_relay.payload_len;
             authentication_request->eap_message.buffer =
-                amf_ue->edhoc_eap_payload;
-            amf_ue->edhoc_eap_payload_len = 0;
+                amf_ue->edhoc_n1_relay.payload;
+            amf_ue->edhoc_n1_relay.payload_len = 0;
         } else {
             authentication_request->eap_message.length =
                 sizeof(edhoc_dummy_start);
