@@ -270,6 +270,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
     OpenAPI_confirmation_data_t *ConfirmationData = NULL;
     OpenAPI_confirmation_data_response_t ConfirmationDataResponse;
     char *res_star_string = NULL;
+    char *eap_payload_string = NULL;
     uint8_t res_star[OGS_KEYSTRLEN(OGS_MAX_RES_LEN)];
     int r;
 
@@ -283,15 +284,6 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         ogs_assert(true ==
             ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
                 recvmsg, "No ConfirmationData", ausf_ue->suci, NULL));
-        return false;
-    }
-
-    res_star_string = ConfirmationData->res_star;
-    if (!res_star_string) {
-        ogs_error("[%s] No ConfirmationData.resStar", ausf_ue->suci);
-        ogs_assert(true ==
-            ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                recvmsg, "No ConfirmationData.resStar", ausf_ue->suci, NULL));
         return false;
     }
 
@@ -315,8 +307,17 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         char *message_4_hex = NULL;
         int8_t edhoc_rc;
 
+        eap_payload_string = ConfirmationData->eap_payload;
+        if (!eap_payload_string) {
+            ogs_error("[%s] No ConfirmationData.eapPayload", ausf_ue->suci);
+            ogs_assert(true ==
+                ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                    recvmsg, "No ConfirmationData.eapPayload", ausf_ue->suci, NULL));
+            return false;
+        }
+
         if (!edhoc_extract_message_from_eap(
-                    res_star_string, &message_from_ue, &eap_id)) {
+                    eap_payload_string, &message_from_ue, &eap_id)) {
             ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_FAILURE;
         } else {
             if (!ausf_ue->edhoc_in_progress) {
@@ -502,6 +503,15 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         ogs_assert(r != OGS_ERROR);
 
         return true;
+    }
+
+    res_star_string = ConfirmationData->res_star;
+    if (!res_star_string) {
+        ogs_error("[%s] No ConfirmationData.resStar", ausf_ue->suci);
+        ogs_assert(true ==
+            ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                recvmsg, "No ConfirmationData.resStar", ausf_ue->suci, NULL));
+        return false;
     }
 
     ogs_ascii_to_hex(res_star_string, strlen(res_star_string),

@@ -135,11 +135,11 @@ ogs_sbi_request_t *amf_nausf_auth_build_authenticate_confirmation(
 
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
         ogs_assert(eap_message);
-        ConfirmationData->res_star = ogs_malloc(eap_message->length * 2 + 1);
-        ogs_assert(ConfirmationData->res_star);
+        ConfirmationData->eap_payload = ogs_malloc(eap_message->length * 2 + 1);
+        ogs_assert(ConfirmationData->eap_payload);
         ogs_hex_to_ascii(
                 eap_message->buffer, eap_message->length,
-                ConfirmationData->res_star, eap_message->length * 2 + 1);
+                ConfirmationData->eap_payload, eap_message->length * 2 + 1);
     } else {
         ogs_hex_to_ascii(amf_ue->xres_star, sizeof(amf_ue->xres_star),
                 xres_star_string, sizeof(xres_star_string));
@@ -153,8 +153,8 @@ ogs_sbi_request_t *amf_nausf_auth_build_authenticate_confirmation(
 
 end:
     if (ConfirmationData && amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        ogs_free(ConfirmationData->res_star);
-        ConfirmationData->res_star = NULL;
+        ogs_free(ConfirmationData->eap_payload);
+        ConfirmationData->eap_payload = NULL;
     }
     if (ConfirmationData)
         ogs_free(ConfirmationData);

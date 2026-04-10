@@ -7,6 +7,8 @@
 OpenAPI_confirmation_data_t *OpenAPI_confirmation_data_create(
     bool is_res_star_null,
     char *res_star,
+    bool is_eap_payload_null,
+    char *eap_payload,
     char *supported_features
 )
 {
@@ -15,6 +17,8 @@ OpenAPI_confirmation_data_t *OpenAPI_confirmation_data_create(
 
     confirmation_data_local_var->is_res_star_null = is_res_star_null;
     confirmation_data_local_var->res_star = res_star;
+    confirmation_data_local_var->is_eap_payload_null = is_eap_payload_null;
+    confirmation_data_local_var->eap_payload = eap_payload;
     confirmation_data_local_var->supported_features = supported_features;
 
     return confirmation_data_local_var;
@@ -30,6 +34,10 @@ void OpenAPI_confirmation_data_free(OpenAPI_confirmation_data_t *confirmation_da
     if (confirmation_data->res_star) {
         ogs_free(confirmation_data->res_star);
         confirmation_data->res_star = NULL;
+    }
+    if (confirmation_data->eap_payload) {
+        ogs_free(confirmation_data->eap_payload);
+        confirmation_data->eap_payload = NULL;
     }
     if (confirmation_data->supported_features) {
         ogs_free(confirmation_data->supported_features);
@@ -49,13 +57,22 @@ cJSON *OpenAPI_confirmation_data_convertToJSON(OpenAPI_confirmation_data_t *conf
     }
 
     item = cJSON_CreateObject();
-    if (!confirmation_data->res_star) {
-        ogs_error("OpenAPI_confirmation_data_convertToJSON() failed [res_star]");
+    if (!confirmation_data->res_star && !confirmation_data->eap_payload) {
+        ogs_error("OpenAPI_confirmation_data_convertToJSON() failed [payload]");
         return NULL;
     }
-    if (cJSON_AddStringToObject(item, "resStar", confirmation_data->res_star) == NULL) {
-        ogs_error("OpenAPI_confirmation_data_convertToJSON() failed [res_star]");
-        goto end;
+    if (confirmation_data->res_star) {
+        if (cJSON_AddStringToObject(item, "resStar", confirmation_data->res_star) == NULL) {
+            ogs_error("OpenAPI_confirmation_data_convertToJSON() failed [res_star]");
+            goto end;
+        }
+    }
+
+    if (confirmation_data->eap_payload) {
+        if (cJSON_AddStringToObject(item, "eapPayload", confirmation_data->eap_payload) == NULL) {
+            ogs_error("OpenAPI_confirmation_data_convertToJSON() failed [eap_payload]");
+            goto end;
+        }
     }
 
     if (confirmation_data->supported_features) {
@@ -74,14 +91,22 @@ OpenAPI_confirmation_data_t *OpenAPI_confirmation_data_parseFromJSON(cJSON *conf
     OpenAPI_confirmation_data_t *confirmation_data_local_var = NULL;
     OpenAPI_lnode_t *node = NULL;
     cJSON *res_star = NULL;
+    cJSON *eap_payload = NULL;
     cJSON *supported_features = NULL;
     res_star = cJSON_GetObjectItemCaseSensitive(confirmation_dataJSON, "resStar");
-    if (!res_star) {
+    if (res_star && !cJSON_IsString(res_star) && !cJSON_IsNull(res_star)) {
         ogs_error("OpenAPI_confirmation_data_parseFromJSON() failed [res_star]");
         goto end;
     }
-    if (!cJSON_IsString(res_star)) {
-        ogs_error("OpenAPI_confirmation_data_parseFromJSON() failed [res_star]");
+
+    eap_payload = cJSON_GetObjectItemCaseSensitive(confirmation_dataJSON, "eapPayload");
+    if (eap_payload && !cJSON_IsString(eap_payload) && !cJSON_IsNull(eap_payload)) {
+        ogs_error("OpenAPI_confirmation_data_parseFromJSON() failed [eap_payload]");
+        goto end;
+    }
+
+    if (!res_star && !eap_payload) {
+        ogs_error("OpenAPI_confirmation_data_parseFromJSON() failed [payload]");
         goto end;
     }
 
@@ -95,7 +120,9 @@ OpenAPI_confirmation_data_t *OpenAPI_confirmation_data_parseFromJSON(cJSON *conf
 
     confirmation_data_local_var = OpenAPI_confirmation_data_create (
         res_star && cJSON_IsNull(res_star) ? true : false,
-        ogs_strdup(res_star->valuestring),
+        res_star && !cJSON_IsNull(res_star) ? ogs_strdup(res_star->valuestring) : NULL,
+        eap_payload && cJSON_IsNull(eap_payload) ? true : false,
+        eap_payload && !cJSON_IsNull(eap_payload) ? ogs_strdup(eap_payload->valuestring) : NULL,
         supported_features && !cJSON_IsNull(supported_features) ? ogs_strdup(supported_features->valuestring) : NULL
     );
 
@@ -137,4 +164,3 @@ OpenAPI_confirmation_data_t *OpenAPI_confirmation_data_copy(OpenAPI_confirmation
 
     return dst;
 }
-
