@@ -27,6 +27,50 @@ static OGS_POOL(ausf_ue_pool, ausf_ue_t);
 
 static int context_initialized = 0;
 
+static const uint8_t default_edhoc_responder_r[32] = {
+    0x52, 0x45, 0x53, 0x50, 0x4f, 0x4e, 0x44, 0x45,
+    0x52, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x5f,
+    0x52, 0x5f, 0x30, 0x31, 0x52, 0x45, 0x53, 0x50,
+    0x4f, 0x4e, 0x44, 0x45, 0x52, 0x5f, 0x30, 0x32,
+};
+
+static const uint8_t default_edhoc_psk_cred[] = {
+    0xA2, 0x02, 0x69, 0x72, 0x65, 0x73, 0x70, 0x6F, 0x6E, 0x64, 0x65,
+    0x72, 0x08, 0xA1, 0x01, 0xA3, 0x01, 0x04, 0x02, 0x41, 0x10, 0x20,
+    0x50, 0x50, 0x93, 0x0F, 0xF4, 0x62, 0xA7, 0x7A, 0x35, 0x40, 0xCF,
+    0x54, 0x63, 0x25, 0xDE, 0xA2, 0x14,
+};
+
+static int ausf_context_parse_hex(
+        const char *field, const char *value,
+        uint8_t *buf, size_t buf_size, size_t *out_len)
+{
+    size_t value_len = 0;
+
+    ogs_assert(field);
+    ogs_assert(value);
+    ogs_assert(buf);
+    ogs_assert(out_len);
+
+    value_len = strlen(value);
+    if (value_len == 0 || (value_len % 2) != 0) {
+        ogs_error("AUSF EDHOC `%s` must be a non-empty even-length hex string",
+                field);
+        return OGS_ERROR;
+    }
+
+    *out_len = value_len / 2;
+    if (*out_len > buf_size) {
+        ogs_error("AUSF EDHOC `%s` is too large [%zu bytes > %zu bytes]",
+                field, *out_len, buf_size);
+        return OGS_ERROR;
+    }
+
+    memset(buf, 0, buf_size);
+    ogs_ascii_to_hex((char *)value, value_len, buf, buf_size);
+    return OGS_OK;
+}
+
 void ausf_context_init(void)
 {
     ogs_assert(context_initialized == 0);
@@ -70,11 +114,30 @@ ausf_context_t *ausf_self(void)
 
 static int ausf_context_prepare(void)
 {
+    memcpy(self.edhoc.private_key, default_edhoc_responder_r,
+            sizeof(default_edhoc_responder_r));
+    self.edhoc.private_key_len = sizeof(default_edhoc_responder_r);
+
+    memcpy(self.edhoc.credential, default_edhoc_psk_cred,
+            sizeof(default_edhoc_psk_cred));
+    self.edhoc.credential_len = sizeof(default_edhoc_psk_cred);
+
     return OGS_OK;
 }
 
 static int ausf_context_validation(void)
 {
+    if (self.edhoc.private_key_len != sizeof(self.edhoc.private_key)) {
+        ogs_error("AUSF EDHOC private_key must decode to %zu bytes",
+                sizeof(self.edhoc.private_key));
+        return OGS_ERROR;
+    }
+
+    if (self.edhoc.credential_len == 0) {
+        ogs_error("AUSF EDHOC credential must not be empty");
+        return OGS_ERROR;
+    }
+
     return OGS_OK;
 }
 
@@ -114,6 +177,32 @@ int ausf_context_parse_config(void)
                     /* handle config in sbi library */
                 } else if (!strcmp(ausf_key, "discovery")) {
                     /* handle config in sbi library */
+                } else if (!strcmp(ausf_key, "edhoc")) {
+                    ogs_yaml_iter_t edhoc_iter;
+                    ogs_yaml_iter_recurse(&ausf_iter, &edhoc_iter);
+                    while (ogs_yaml_iter_next(&edhoc_iter)) {
+                        const char *edhoc_key = ogs_yaml_iter_key(&edhoc_iter);
+                        const char *v = ogs_yaml_iter_value(&edhoc_iter);
+
+                        ogs_assert(edhoc_key);
+                        if (!strcmp(edhoc_key, "private_key")) {
+                            if (!v || ausf_context_parse_hex(
+                                        edhoc_key, v,
+                                        self.edhoc.private_key,
+                                        sizeof(self.edhoc.private_key),
+                                        &self.edhoc.private_key_len) != OGS_OK)
+                                return OGS_ERROR;
+                        } else if (!strcmp(edhoc_key, "credential")) {
+                            if (!v || ausf_context_parse_hex(
+                                        edhoc_key, v,
+                                        self.edhoc.credential,
+                                        sizeof(self.edhoc.credential),
+                                        &self.edhoc.credential_len) != OGS_OK)
+                                return OGS_ERROR;
+                        } else {
+                            ogs_warn("unknown key `%s`", edhoc_key);
+                        }
+                    }
                 } else
                     ogs_warn("unknown key `%s`", ausf_key);
             }

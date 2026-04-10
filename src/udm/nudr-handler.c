@@ -36,7 +36,7 @@ static bool edhoc_set_vector_from_subscription(
         return false;
     }
 
-    vector->av_type = OpenAPI_av_type_5G_HE_AKA;
+    vector->av_type = OpenAPI_av_type_EDHOC_PSK;
     vector->rand = (char *)"00";
     vector->autn = (char *)"00";
     vector->edhoc_kid = subscription->edhoc_kid;

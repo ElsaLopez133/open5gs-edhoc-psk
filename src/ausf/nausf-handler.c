@@ -22,20 +22,6 @@
 #include "nausf-handler.h"
 #include "lakers.h"
 
-static const uint8_t edhoc_responder_r[32] = {
-    0x52, 0x45, 0x53, 0x50, 0x4f, 0x4e, 0x44, 0x45,
-    0x52, 0x5f, 0x44, 0x55, 0x4d, 0x4d, 0x59, 0x5f,
-    0x52, 0x5f, 0x30, 0x31, 0x52, 0x45, 0x53, 0x50,
-    0x4f, 0x4e, 0x44, 0x45, 0x52, 0x5f, 0x30, 0x32,
-};
-
-static const uint8_t edhoc_psk_cred[] = {
-    0xA2, 0x02, 0x69, 0x72, 0x65, 0x73, 0x70, 0x6F, 0x6E, 0x64, 0x65,
-    0x72, 0x08, 0xA1, 0x01, 0xA3, 0x01, 0x04, 0x02, 0x41, 0x10, 0x20,
-    0x50, 0x50, 0x93, 0x0F, 0xF4, 0x62, 0xA7, 0x7A, 0x35, 0x40, 0xCF,
-    0x54, 0x63, 0x25, 0xDE, 0xA2, 0x14,
-};
-
 #define EDHOC_EAP_NOTIFICATION_TYPE 0x02
 #define EDHOC_EXPORTER_LABEL_MSK 26
 #define EDHOC_EXPORTER_LABEL_EMSK 27
@@ -348,11 +334,12 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                             &message_from_ue, &c_i, &ead_1);
                 if (edhoc_rc == 0)
                     edhoc_rc = credential_new_symmetric(&cred_r,
-                            edhoc_psk_cred, sizeof(edhoc_psk_cred));
+                            ausf_self()->edhoc.credential,
+                            ausf_self()->edhoc.credential_len);
                 if (edhoc_rc == 0)
                     edhoc_rc = responder_prepare_message_2(
                             &ausf_ue->edhoc_responder,
-                            (const BytesP256ElemLen *)edhoc_responder_r,
+                            (const BytesP256ElemLen *)ausf_self()->edhoc.private_key,
                             &cred_r, ByReference,
                             &c_r, &ead_2, &message_2);
                 if (edhoc_rc == 0)

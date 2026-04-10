@@ -40,6 +40,28 @@ prepare_dirs() {
   mkdir -p "${LOG_DIR}" "${PID_DIR}"
 }
 
+wait_for_log_line() {
+  local logfile="$1"
+  local pattern="$2"
+  local timeout_s="$3"
+  local label="$4"
+  local waited=0
+
+  while (( waited < timeout_s )); do
+    if [[ -f "${logfile}" ]] && grep -qE "${pattern}" "${logfile}"; then
+      return 0
+    fi
+    sleep 1
+    ((waited+=1))
+  done
+
+  echo "[open5gs] timeout waiting for ${label} in ${logfile}" >&2
+  if [[ -f "${logfile}" ]]; then
+    tail -n 20 "${logfile}" >&2 || true
+  fi
+  return 1
+}
+
 require_sudo() {
   sudo -v
 }
@@ -97,8 +119,17 @@ start_one_nf() {
 
 start_open5gs() {
   ensure_nrf_log_writable
+  echo "[open5gs] start NRF"
+  start_one_nf "open5gs-nrfd"
+  wait_for_log_line \
+    "${LOG_DIR}/open5gs-nrfd.log" \
+    'NF registered|nghttp2_server\(\)' \
+    15 \
+    "NRF startup"
+
   echo "[open5gs] start control plane"
   for nf in "${OPEN5GS_DAEMONS[@]}"; do
+    [[ "${nf}" == "open5gs-nrfd" ]] && continue
     start_one_nf "${nf}"
   done
 
@@ -106,6 +137,27 @@ start_open5gs() {
   local upf_log="${LOG_DIR}/open5gs-upfd.log"
   local upf_pid="${PID_DIR}/open5gs-upfd.pid"
   sudo bash -c "nohup '${OPEN5GS_BIN_DIR}/open5gs-upfd' >'${upf_log}' 2>&1 & echo \$! >'${upf_pid}'"
+
+  wait_for_log_line \
+    "${LOG_DIR}/open5gs-amfd.log" \
+    'ngap_server\(\)' \
+    15 \
+    "AMF NGAP listener"
+  wait_for_log_line \
+    "${LOG_DIR}/open5gs-ausfd.log" \
+    'NF registered' \
+    15 \
+    "AUSF NRF registration"
+  wait_for_log_line \
+    "${LOG_DIR}/open5gs-udmd.log" \
+    'NF registered' \
+    15 \
+    "UDM NRF registration"
+  wait_for_log_line \
+    "${LOG_DIR}/open5gs-smfd.log" \
+    'NF registered' \
+    15 \
+    "SMF NRF registration"
 }
 
 check_open5gs() {
