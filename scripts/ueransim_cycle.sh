@@ -25,6 +25,28 @@ prepare_dirs() {
   mkdir -p "${LOG_DIR}" "${PID_DIR}"
 }
 
+wait_for_log_line() {
+  local logfile="$1"
+  local pattern="$2"
+  local timeout_s="$3"
+  local label="$4"
+  local waited=0
+
+  while (( waited < timeout_s )); do
+    if [[ -f "${logfile}" ]] && grep -qE "${pattern}" "${logfile}"; then
+      return 0
+    fi
+    sleep 1
+    ((waited+=1))
+  done
+
+  echo "[ueransim] timeout waiting for ${label} in ${logfile}" >&2
+  if [[ -f "${logfile}" ]]; then
+    tail -n 20 "${logfile}" >&2 || true
+  fi
+  return 1
+}
+
 require_sudo() {
   sudo -v
 }
@@ -73,6 +95,13 @@ start_ueransim() {
   fi
 
   if [[ "${start_ue}" -eq 1 ]]; then
+    if [[ "${start_gnb}" -eq 1 ]]; then
+      wait_for_log_line \
+        "${LOG_DIR}/nr-gnb.log" \
+        'NG Setup procedure is successful' \
+        20 \
+        "gNB NG setup"
+    fi
     echo "[ueransim] start UE (sudo)"
     sudo bash -c "nohup '${UERANSIM_BUILD_DIR}/nr-ue' -c '${UERANSIM_ROOT}/config/open5gs-ue.yaml' >'${LOG_DIR}/nr-ue.log' 2>&1 & echo \$! >'${PID_DIR}/nr-ue.pid'"
   fi
