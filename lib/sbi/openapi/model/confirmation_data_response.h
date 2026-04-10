@@ -24,6 +24,8 @@ typedef struct OpenAPI_confirmation_data_response_s {
     OpenAPI_auth_result_e auth_result;
     char *supi;
     char *kseaf;
+    /* Open5GS EDHOC-PSK extension field */
+    char *edhoc_eap_payload;
     OpenAPI_list_t *pvs_info;
 } OpenAPI_confirmation_data_response_t;
 
@@ -31,6 +33,7 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_create(
     OpenAPI_auth_result_e auth_result,
     char *supi,
     char *kseaf,
+    char *edhoc_eap_payload,
     OpenAPI_list_t *pvs_info
 );
 void OpenAPI_confirmation_data_response_free(OpenAPI_confirmation_data_response_t *confirmation_data_response);
@@ -43,4 +46,3 @@ OpenAPI_confirmation_data_response_t *OpenAPI_confirmation_data_response_copy(Op
 #endif
 
 #endif /* _OpenAPI_confirmation_data_response_H_ */
-

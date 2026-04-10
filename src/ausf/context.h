@@ -74,16 +74,22 @@ struct ausf_ue_s {
         ogs_sbi_client_t *client;
     } auth_event;
     OpenAPI_auth_result_e auth_result;
+    struct {
+        uint8_t kid[16];
+        size_t kid_len;
+        uint8_t cred_i[192];
+        size_t cred_i_len;
+    } edhoc_cred_i;
+    struct {
+        uint8_t eap_payload[1024];
+        size_t eap_payload_len;
+    } edhoc_relay;
     /* EDHOC responder session state kept across message_1/message_3 SBI calls. */
     bool edhoc_in_progress;
     bool edhoc_waiting_message4_ack;
     EdhocResponder edhoc_responder;
     uint8_t edhoc_c_i;
     uint8_t edhoc_c_r;
-    uint8_t edhoc_kid[16];
-    size_t edhoc_kid_len;
-    uint8_t edhoc_cred_i[192];
-    size_t edhoc_cred_i_len;
 
     uint8_t rand[OGS_RAND_LEN];
     uint8_t xres_star[OGS_MAX_RES_LEN];

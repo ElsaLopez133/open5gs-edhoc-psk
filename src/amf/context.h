@@ -462,9 +462,11 @@ struct amf_ue_s {
         ogs_sbi_client_t *client;
     } confirmation_for_5g_aka;
     OpenAPI_auth_type_e auth_type;
-    /* Temporary relay buffer for EDHOC message_2 tunneled over N12 and sent on N1 EAP. */
-    uint8_t         edhoc_eap_payload[1024];
-    size_t          edhoc_eap_payload_len;
+    struct {
+        /* Raw EAP payload relayed between AUSF (N12) and UE (N1) for EDHOC. */
+        uint8_t payload[1024];
+        size_t payload_len;
+    } edhoc_n1_relay;
     /* Random challenge value */
     uint8_t         rand[OGS_RAND_LEN];
     /* Authentication token */
