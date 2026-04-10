@@ -131,8 +131,10 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         }
     }
 
-    if (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA &&
-        AuthenticationVector->av_type != OpenAPI_av_type_5G_HE_AKA) {
+    if ((AuthenticationInfoResult->auth_type == OpenAPI_auth_type_5G_AKA &&
+            AuthenticationVector->av_type != OpenAPI_av_type_5G_HE_AKA) ||
+        (AuthenticationInfoResult->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
+            AuthenticationVector->av_type != OpenAPI_av_type_EDHOC_PSK)) {
         ogs_error("[%s] Not supported Auth Method [%d]",
             ausf_ue->suci, AuthenticationVector->av_type);
         /*
@@ -457,11 +459,13 @@ bool ausf_nudm_ueau_handle_result_confirmation_inform(ausf_ue_t *ausf_ue,
     ConfirmationDataResponse.auth_result = ausf_ue->auth_result;
     ConfirmationDataResponse.supi = ausf_ue->supi;
 
-    ogs_kdf_kseaf(ausf_ue->serving_network_name,
-            ausf_ue->kausf, ausf_ue->kseaf);
-    ogs_hex_to_ascii(ausf_ue->kseaf, sizeof(ausf_ue->kseaf),
-            kseaf_string, sizeof(kseaf_string));
-    ConfirmationDataResponse.kseaf = kseaf_string;
+    if (ausf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_SUCCESS) {
+        ogs_kdf_kseaf(ausf_ue->serving_network_name,
+                ausf_ue->kausf, ausf_ue->kseaf);
+        ogs_hex_to_ascii(ausf_ue->kseaf, sizeof(ausf_ue->kseaf),
+                kseaf_string, sizeof(kseaf_string));
+        ConfirmationDataResponse.kseaf = kseaf_string;
+    }
 
     memset(&sendmsg, 0, sizeof(sendmsg));
 

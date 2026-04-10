@@ -40,6 +40,12 @@ typedef struct ausf_context_s {
     ogs_list_t      ausf_ue_list;
     ogs_hash_t      *suci_hash;
     ogs_hash_t      *supi_hash;
+    struct {
+        uint8_t private_key[32];
+        size_t private_key_len;
+        uint8_t credential[192];
+        size_t credential_len;
+    } edhoc;
 
 } ausf_context_t;
 
@@ -80,10 +86,6 @@ struct ausf_ue_s {
         uint8_t cred_i[192];
         size_t cred_i_len;
     } edhoc_cred_i;
-    struct {
-        uint8_t eap_payload[1024];
-        size_t eap_payload_len;
-    } edhoc_relay;
     /* EDHOC responder session state kept across message_1/message_3 SBI calls. */
     bool edhoc_in_progress;
     bool edhoc_waiting_message4_ack;
