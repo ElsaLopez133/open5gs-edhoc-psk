@@ -323,6 +323,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
             if (!ausf_ue->edhoc_in_progress) {
                 /* First EDHOC leg: parse message_1 and return message_2 with
                  * AUTHENTICATION_ONGOING so AMF relays it to UE. */
+                ogs_time_t leg1_start = ogs_time_now();
                 memset(&ead_1, 0, sizeof(ead_1));
                 memset(&ead_2, 0, sizeof(ead_2));
                 memset(&message_2, 0, sizeof(message_2));
@@ -347,6 +348,9 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                     edhoc_rc = edhoc_build_eap_request_hex(
                             (uint8_t)(eap_id + 1),
                             &message_2, &message_2_hex) ? 0 : -1;
+                ogs_info("EDHOC_TIMING: leg1_m1_m2 %lld us UE[%s]",
+                    (long long)(ogs_time_now() - leg1_start),
+                    ausf_ue->suci);
 
                 if (edhoc_rc != 0) {
                     ausf_ue->auth_result =
@@ -383,6 +387,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
             } else if (!ausf_ue->edhoc_waiting_message4_ack) {
                 /* Second EDHOC leg: parse message_3 and generate message_4.
                  * message_4 is relayed in AUTHENTICATION_ONGOING. */
+                ogs_time_t leg2_start = ogs_time_now();
                 memset(&ead_3, 0, sizeof(ead_3));
                 memset(&ead_4, 0, sizeof(ead_4));
                 memset(&message_4, 0, sizeof(message_4));
@@ -461,6 +466,9 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                                         stream, response));
 
                             ausf_ue->edhoc_waiting_message4_ack = true;
+                            ogs_info("EDHOC_TIMING: leg2_m3_m4_kausf %lld us UE[%s]",
+                                (long long)(ogs_time_now() - leg2_start),
+                                ausf_ue->suci);
                             ogs_info("EDHOC: generated message_4 for UE[%s] [m3_len=%zu,m4_len=%zu]",
                                     ausf_ue->suci, (size_t)message_from_ue.len,
                                     (size_t)message_4.len);

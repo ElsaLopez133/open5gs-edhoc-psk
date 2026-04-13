@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document describes the design, implementation, and rationale behind integrating the EDHOC-PSK (Ephemeral Diffie-Hellman Over COSE with Pre-Shared Key) key establishment protocol into the 5G core network as a proof-of-concept replacement for 5G-AKA authentication. The implementation is built on Open5GS and uses UERANSIM for UE-side testing. EDHOC-PSK and 5G-AKA operate on fundamentally different layers and follow different paradigms: EDHOC is a lightweight two-party key establishment protocol (client/server), while 5G-AKA is a multi-party challenge-response mechanism distributed across Network Functions (NFs). This work maps EDHOC-PSK onto the existing 5G service-based architecture by defining the UE as EDHOC Initiator, the AUSF as EDHOC Responder, and the AMF as a transparent relay, while using the UDM/UDR path to provision EDHOC credentials from the subscriber database.
+This document describes the design, implementation, and rationale behind integrating the EDHOC-PSK (Ephemeral Diffie-Hellman Over COSE with Pre-Shared Key) key establishment protocol into the 5G core network as a proof-of-concept replacement for 5G-AKA authentication. The implementation is built on Open5GS and uses UERANSIM for UE-side testing. EDHOC-PSK and 5G-AKA follow fundamentally different paradigms: EDHOC is a general-purpose authenticated key establishment protocol designed to be embedded into any system, while 5G-AKA is a domain-specific authentication mechanism tightly integrated into the 3GPP architecture. Concretely, EDHOC is a lightweight two-party key establishment protocol (client/server), while 5G-AKA is a multi-party challenge-response mechanism distributed across Network Functions (NFs). This work maps EDHOC-PSK onto the existing 5G service-based architecture by defining the UE as EDHOC Initiator, the AUSF as EDHOC Responder, and the AMF as a transparent relay, while using the UDM/UDR path to provision EDHOC credentials from the subscriber database.
 
 ---
 
@@ -10,7 +10,7 @@ This document describes the design, implementation, and rationale behind integra
 
 ### 1.1 Background
 
-5G networks authenticate subscribers using 5G-AKA (Authentication and Key Agreement), defined in 3GPP TS 33.501. This mechanism relies on symmetric credentials stored on USIM cards and in the UDM/UDR, with key derivation rooted in the Milenage or TUAK algorithms. While proven and widely deployed, 5G-AKA is tightly coupled to the USIM ecosystem and the specific key hierarchy (K, CK, IK, KAUSF, KSEAF, KAMF).
+5G networks authenticate subscribers using 5G-AKA (Authentication and Key Agreement), defined in 3GPP TS 33.501. This mechanism relies on symmetric credentials stored on USIM cards and in the UDM/UDR, with key derivation rooted in the Milenage or TUAK algorithms — cryptographic function sets (built on AES-128 and Keccak respectively) that run inside the USIM and in the UDM to produce authentication vectors (RES, CK, IK) from the permanent key K and a random challenge RAND. While proven and widely deployed, 5G-AKA is tightly coupled to the USIM ecosystem and the specific key hierarchy (K, CK, IK, KAUSF, KSEAF, KAMF).
 
 EDHOC (Ephemeral Diffie-Hellman Over COSE, RFC 9528) is an IETF lightweight authenticated key establishment protocol designed for constrained environments. The EDHOC-PSK method (draft-ietf-lake-edhoc-psk) uses a pre-shared key for mutual authentication and establishes a fresh shared secret with forward secrecy. EDHOC is significantly lighter than protocols like TLS 1.3 or IKEv2, making it attractive for IoT and resource-constrained 5G devices.
 
@@ -18,14 +18,14 @@ EDHOC (Ephemeral Diffie-Hellman Over COSE, RFC 9528) is an IETF lightweight auth
 
 The goal of this work is to demonstrate that EDHOC-PSK can serve as a viable alternative authentication mechanism within the 5G core, substituting 5G-AKA without requiring structural changes to the service-based architecture. This involves solving several mapping problems:
 
-- **Structural mismatch**: EDHOC is a two-party protocol (Initiator/Responder); 5G authentication involves four NFs (UE, AMF, AUSF, UDM).
+- **Structural mismatch**: EDHOC is a two-party protocol (Initiator/Responder); 5G authentication involves four entities in the authentication path (UE, AMF, AUSF, UDM).
 - **Message count mismatch**: EDHOC-PSK requires four messages; 5G-AKA uses a single challenge-response round.
 - **Key hierarchy mismatch**: EDHOC produces `PRK_out` via EDHOC-KDF; 5G-AKA produces CK, IK, KAUSF via Milenage/TUAK.
-- **Transport mismatch**: EDHOC messages have no native 5G NAS or SBI carrier.
+- **Transport mismatch**: EDHOC messages are compact CBOR byte strings with no pre-defined carrier in either the NAS protocol (the signaling protocol between UE and AMF, which defines specific IEs like RAND and AUTN for AKA) or the SBI (the HTTP/2-based REST API between core NFs, which uses OpenAPI-defined JSON models with no provision for arbitrary binary payloads).
 
 ### 1.3 Scope
 
-This is a proof-of-concept implementation. It modifies Open5GS (core network) and UERANSIM (UE simulator) to run the EDHOC-PSK protocol end-to-end over the existing 5G infrastructure. It does not implement the full EAP-EDHOC method (draft-ietf-emu-eap-edhoc), though it draws on that specification for key derivation guidance.
+This is a proof-of-concept implementation. It modifies Open5GS (core network) and UERANSIM (UE simulator) to run the EDHOC-PSK protocol end-to-end over the existing 5G infrastructure. It does not implement the EAP-EDHOC method (draft-ietf-emu-eap-edhoc), which is a separate protocol that wraps EDHOC inside a proper EAP method with its own registered EAP type, EAP state machine, and identity exchange. This implementation instead uses EAP Notification packets as a lightweight transport for raw EDHOC-PSK messages, and draws on the EAP-EDHOC specification only for key derivation guidance (EMSK via EDHOC_Exporter).
 
 ---
 
@@ -122,7 +122,7 @@ This is the point at which the entire NF chain learns that this subscriber uses 
 
 #### Phase 1: Bootstrap (EDHOC-START)
 
-Upon receiving `auth_type = EDHOC_PSK` from the AUSF, the AMF sends a NAS Authentication Request to the UE containing an EAP payload with a bootstrap marker (`EDHOC-START`). This signals the UE to begin the EDHOC exchange rather than processing an AKA challenge.
+Upon receiving `auth_type = EDHOC_PSK` from the AUSF, the AMF sends a NAS Authentication Request to the UE containing an EAP payload with a bootstrap marker (`EDHOC-START`). This bootstrap step is necessary because of a role inversion: in 5G-AKA, the network sends the first authentication payload (RAND and AUTN in the NAS Authentication Request), and the UE responds. In EDHOC-PSK, the UE is the Initiator and must generate message_1 first — but the 5G signaling flow always starts with the network sending a NAS Authentication Request to the UE. The EDHOC-START marker resolves this mismatch by telling the UE: "respond with EDHOC message_1 instead of an AKA RES*."
 
 The AUSF stores the subscriber's EDHOC credentials in its UE context and provides the AMF with an `eap-session` link for subsequent round-trips.
 
@@ -168,7 +168,7 @@ EDHOC-PSK produces a completely different output: `PRK_out`, a pseudo-random key
 
 The injection point chosen is KAUSF. This is the highest key in the 5G authentication key hierarchy that is authentication-method-specific. Everything below KAUSF (KSEAF, KAMF, NAS/AS keys) uses standardized 5G KDFs that are independent of the authentication method.
 
-The derivation follows the approach outlined in the EAP-EDHOC specification (draft-ietf-emu-eap-edhoc-08, Section 5.3), adapted for the fact that this implementation does not use a full EAP method:
+The derivation follows the approach outlined in the EAP-EDHOC specification (draft-ietf-emu-eap-edhoc-08, Section 5.3), adapted for the fact that this implementation does not use a full EAP method. The derivation produces an **EMSK (Extended Master Session Key)**, an EAP concept (RFC 3748, Section 7.10) — a 64-byte key that EAP methods export for use by higher-layer protocols. In 5G (TS 33.501, Section 6.1.3), KAUSF is derived from the EMSK for all EAP-based authentication methods:
 
 ```
 EMSK = EDHOC_Exporter(label=27, context=empty, length=64)
@@ -233,7 +233,9 @@ EDHOC messages are encapsulated in EAP packets using the EAP Notification type (
 
 **Why EAP Notification?** This is a pragmatic choice to avoid defining new NAS IEs (Information Elements) or registering a new EAP type. EAP Notification is universally supported in NAS stacks, and the `eap_message` field is already defined in the NAS Authentication Request/Response specification. Creating a new carrier would require changes to the NAS encoder/decoder, the ASN.1 definitions, and potentially the gNB RRC layer, none of which are necessary for a proof-of-concept.
 
-**Trade-off**: EAP Notification has defined semantics in RFC 3748 (displaying a message to the user). Reusing it for binary protocol messages is a departure from the specification. A production implementation should register a proper EAP method type or define a new NAS IE. The EAP-EDHOC draft (draft-ietf-emu-eap-edhoc) defines a proper EAP method for EDHOC, which would be the appropriate production approach.
+**EAP Notification (Type 2)** is defined in RFC 3748, Section 5.2, for the authenticator to send displayable text messages to the user (e.g., "your password will expire soon"). This implementation repurposes it to carry binary EDHOC messages — it works because the `eap_message` IE (Information Element type 0x78) in NAS Authentication Request/Response messages accepts any complete EAP packet regardless of EAP type, but it is semantically incorrect.
+
+**Trade-off**: A production implementation has two proper alternatives: (1) implement the full EAP-EDHOC method (draft-ietf-emu-eap-edhoc), which defines a registered EAP type for EDHOC and would still use the existing `eap_message` NAS IE — this requires an EAP supplicant (a client-side EAP state machine handling method negotiation and identity exchange), which UERANSIM does not have; or (2) define a new NAS Information Element specifically for EDHOC payloads, which would require changes to the NAS specification (ASN.1 definitions, encoder/decoder) and potentially the gNB RRC layer.
 
 ### 5.3 N12 Transport: Extended SBI Models
 
@@ -370,7 +372,7 @@ However, the key derivation approach (EMSK via EDHOC_Exporter, label 27) follows
 
 ### 8.2 Why message_4 is Mandatory
 
-In the base EDHOC specification (RFC 9528), message_4 is optional. In this implementation, it is mandatory for two reasons:
+In the base EDHOC specification (RFC 9528), message_4 is optional. However, in EDHOC-PSK (draft-ietf-lake-edhoc-psk), message_4 is **mandatory** — it is required for key confirmation because the PSK method needs explicit confirmation from the Responder. This mandatory status aligns well with the 5G architecture for two additional reasons:
 
 1. **AUSF completion signal**: The AUSF needs to know when the UE has successfully completed the exchange before declaring `AUTHENTICATION_SUCCESS` and returning KSEAF to the AMF. Without message_4, the AUSF would have to declare success immediately after sending message_2's response (containing message_4), which is optimistic and does not confirm UE-side success.
 
@@ -400,17 +402,17 @@ This approach minimizes the changeset and demonstrates feasibility. A production
 
 ## 9. Comparison with 5G-AKA
 
-| Property | 5G-AKA | EDHOC-PSK (this work) |
-|----------|--------|----------------------|
-| **Authentication rounds** | 1 (challenge-response) | 3 NAS round-trips (4 EDHOC messages + ack) |
-| **Forward secrecy** | No (keys derived from permanent K) | Yes (ephemeral DH exchange) |
-| **Credential type** | USIM (K, OPc, SQN) | Pre-shared key + kid |
-| **Key derivation root** | Milenage/TUAK -> CK, IK -> KAUSF | EDHOC_Exporter -> EMSK -> KAUSF |
-| **NAS message overhead** | ~48 bytes (RAND+AUTN) | ~40-60 bytes per EDHOC message |
-| **Mutual authentication** | Via AUTN (network) + RES* (UE) | Via EDHOC message_2/message_3/message_4 (complete after message_4) |
-| **USIM dependency** | Required | Not required |
-| **NF changes required** | None | AMF, AUSF, UDM, UDR, OpenAPI models |
-| **UE changes required** | None | NAS layer modification |
+| Property | 5G-AKA                             | EDHOC-PSK (this work)                                              |
+|----------|------------------------------------|--------------------------------------------------------------------|
+| **Authentication rounds** | 1 (challenge-response)             | 3 NAS round-trips (4 EDHOC messages + ack)                         |
+| **Forward secrecy** | No (keys derived from permanent K) | Yes (ephemeral DH exchange)                                        |
+| **Credential type** | USIM (K, OPc, SQN)                 | Pre-shared key + kid                                               |
+| **Key derivation root** | Milenage/TUAK -> CK, IK -> KAUSF   | EDHOC_Exporter -> EMSK -> KAUSF                                    |
+| **NAS message overhead** | ~48 bytes (16B RAND + 16B AUTN + 16B RES*) | ~92 bytes total: message_1 (~37B), message_2 (~35B), message_3 (~11B), message_4 (~9B), plus 5B EAP framing per message |
+| **Mutual authentication** | Via AUTN (network) + RES* (UE)     | Via EDHOC message_2/message_3/message_4 (complete after message_4) |
+| **USIM dependency** | Required                           | Not required                                                       |
+| **NF changes required** | None                               | AMF, AUSF, UDM, UDR, OpenAPI models                                |
+| **UE changes required** | None                               | NAS layer modification                                             |
 
 <!-- POINT TO EXPAND: Add performance measurements:
      - End-to-end authentication time (5G-AKA vs EDHOC-PSK)

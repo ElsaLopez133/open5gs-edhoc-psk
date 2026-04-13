@@ -119,6 +119,13 @@ int ogs_dbi_auth_info(char *supi, ogs_dbi_auth_info_t *auth_info)
         }
     }
 
+    if (bson_iter_init_find(&iter, document, "authentication_method") &&
+        BSON_ITER_HOLDS_UTF8(&iter)) {
+        utf8 = (char *)bson_iter_utf8(&iter, &length);
+        ogs_cpystrn(auth_info->authentication_method, utf8,
+            sizeof(auth_info->authentication_method));
+    }
+
     if (bson_iter_init_find(&array_iter, document, "edhoc_credentials") &&
         BSON_ITER_HOLDS_ARRAY(&array_iter)) {
         const uint8_t *array_data = NULL;
