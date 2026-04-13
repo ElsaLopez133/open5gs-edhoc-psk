@@ -462,6 +462,8 @@ struct amf_ue_s {
         ogs_sbi_client_t *client;
     } confirmation_for_5g_aka;
     OpenAPI_auth_type_e auth_type;
+    /* Timestamp for measuring authentication latency */
+    ogs_time_t auth_start_time;
     struct {
         /* Raw EAP payload relayed between AUSF (N12) and UE (N1) for EDHOC. */
         uint8_t payload[1024];

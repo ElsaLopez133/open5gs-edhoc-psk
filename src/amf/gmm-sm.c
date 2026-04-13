@@ -2098,6 +2098,7 @@ void gmm_state_authentication(ogs_fsm_t *s, amf_event_t *e)
     switch (e->h.id) {
     case OGS_FSM_ENTRY_SIG:
         amf_ue->auth_synch_fail_count = 0;
+        amf_ue->auth_start_time = ogs_time_now();
         break;
     case OGS_FSM_EXIT_SIG:
         break;
@@ -2343,6 +2344,18 @@ void gmm_state_authentication(ogs_fsm_t *s, amf_event_t *e)
                                 amf_ue->selected_int_algorithm);
                             AMF_RESTORE_CONTEXT_ON_FAILURE(amf_ue, s);
                             break;
+                        }
+
+                        if (amf_ue->auth_start_time) {
+                            ogs_time_t auth_elapsed =
+                                ogs_time_now() - amf_ue->auth_start_time;
+                            ogs_info("[%s] AUTH_LATENCY: %s %lld us",
+                                amf_ue->suci,
+                                amf_ue->auth_type ==
+                                    OpenAPI_auth_type_EDHOC_PSK ?
+                                    "EDHOC_PSK" : "5G_AKA",
+                                (long long)auth_elapsed);
+                            amf_ue->auth_start_time = 0;
                         }
 
                         OGS_FSM_TRAN(&amf_ue->sm, &gmm_state_security_mode);

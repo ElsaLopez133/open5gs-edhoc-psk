@@ -80,7 +80,24 @@ bool udr_nudr_dr_handle_subscription_authentication(
                     sizeof(AuthenticationSubscription));
 
             AuthenticationSubscription.authentication_method =
-                OpenAPI_auth_method_EDHOC_PSK;
+                OpenAPI_auth_method_5G_AKA;
+            if (auth_info.authentication_method[0]) {
+                if (!strcmp(auth_info.authentication_method, "EDHOC_PSK")) {
+                    AuthenticationSubscription.authentication_method =
+                        OpenAPI_auth_method_EDHOC_PSK;
+                } else if (!strcmp(auth_info.authentication_method, "5G_AKA")) {
+                    AuthenticationSubscription.authentication_method =
+                        OpenAPI_auth_method_5G_AKA;
+                } else {
+                    ogs_error("[%s] Unsupported authentication_method in subscriber DB [%s]",
+                            supi, auth_info.authentication_method);
+                    ogs_assert(true ==
+                        ogs_sbi_server_send_error(stream,
+                            OGS_SBI_HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                            recvmsg, "Unsupported authentication_method", supi, NULL));
+                    return false;
+                }
+            }
 
             ogs_hex_to_ascii(auth_info.k, sizeof(auth_info.k),
                     k_string, sizeof(k_string));
