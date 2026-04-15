@@ -21,6 +21,18 @@
 #include "nnrf-handler.h"
 #include "nausf-handler.h"
 #include "lakers.h"
+#include <stdint.h>
+#include <time.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <x86intrin.h>
+#define OGS_HAVE_CPU_CYCLES 1
+#else
+#define OGS_HAVE_CPU_CYCLES 0
+#endif
+
+#ifndef CLOCK_MONOTONIC_RAW
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
 
 #define EDHOC_EAP_NOTIFICATION_TYPE 0x02
 #define EDHOC_EXPORTER_LABEL_MSK 26
@@ -33,6 +45,40 @@ typedef struct edhoc_cred_resolver_ctx_s {
     const uint8_t *cred;
     size_t cred_len;
 } edhoc_cred_resolver_ctx_t;
+
+static inline uint64_t ogs_crypto_now_ns(void)
+{
+    struct timespec ts;
+
+    ogs_assert(clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0);
+    return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+}
+
+#if OGS_HAVE_CPU_CYCLES
+static inline uint64_t ogs_crypto_now_cycles(void)
+{
+    unsigned int aux;
+
+    return __rdtscp(&aux);
+}
+#endif
+
+static void ogs_log_edhoc_crypto(
+        const char *label, uint64_t elapsed_ns, uint64_t elapsed_cycles,
+        const char *suci)
+{
+#if OGS_HAVE_CPU_CYCLES
+    ogs_info("EDHOC_CRYPTO: %s %llu ns %llu cycles UE[%s]",
+            label,
+            (unsigned long long)elapsed_ns,
+            (unsigned long long)elapsed_cycles,
+            suci);
+#else
+    (void)elapsed_cycles;
+    ogs_info("EDHOC_CRYPTO: %s %llu ns N/A cycles UE[%s]",
+            label, (unsigned long long)elapsed_ns, suci);
+#endif
+}
 
 static bool edhoc_extract_kid_from_id_cred(
         const IdCred *id_cred_i, const uint8_t **kid, size_t *kid_len)
@@ -185,6 +231,10 @@ static int edhoc_derive_kausf_from_exporter(ausf_ue_t *ausf_ue)
 {
     uint8_t emsk[EDHOC_EXPORTER_KEY_LEN];
     int8_t edhoc_rc;
+    uint64_t t0_ns, t1_ns;
+#if OGS_HAVE_CPU_CYCLES
+    uint64_t t0_cycles, t1_cycles;
+#endif
 
     ogs_assert(ausf_ue);
 
@@ -197,11 +247,24 @@ static int edhoc_derive_kausf_from_exporter(ausf_ue_t *ausf_ue)
      * For that reason the exporter context is left empty here, keeping EMSK
      * tied to the EDHOC transcript itself rather than to the temporary EAP
      * Notification wrapper used to relay bytes between UE and AMF/AUSF. */
+    t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+    t0_cycles = ogs_crypto_now_cycles();
+#endif
     edhoc_rc = responder_edhoc_exporter(
             &ausf_ue->edhoc_responder,
             EDHOC_EXPORTER_LABEL_EMSK,
             NULL, 0,
             emsk, sizeof(emsk));
+    t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+    t1_cycles = ogs_crypto_now_cycles();
+    ogs_log_edhoc_crypto("responder_edhoc_exporter", t1_ns - t0_ns,
+            t1_cycles - t0_cycles, ausf_ue->suci);
+#else
+    ogs_log_edhoc_crypto("responder_edhoc_exporter", t1_ns - t0_ns,
+            0, ausf_ue->suci);
+#endif
     if (edhoc_rc != 0) {
         ogs_error("EDHOC: EMSK export failed for UE[%s] [rc=%d]",
                 ausf_ue->suci, edhoc_rc);
@@ -324,26 +387,61 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                 /* First EDHOC leg: parse message_1 and return message_2 with
                  * AUTHENTICATION_ONGOING so AMF relays it to UE. */
                 ogs_time_t leg1_start = ogs_time_now();
+                uint64_t t0_ns, t1_ns;
+#if OGS_HAVE_CPU_CYCLES
+                uint64_t t0_cycles, t1_cycles;
+#endif
                 memset(&ead_1, 0, sizeof(ead_1));
                 memset(&ead_2, 0, sizeof(ead_2));
                 memset(&message_2, 0, sizeof(message_2));
                 memset(&cred_r, 0, sizeof(cred_r));
 
                 edhoc_rc = responder_new(&ausf_ue->edhoc_responder);
-                if (edhoc_rc == 0)
+                if (edhoc_rc == 0) {
+                    t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                    t0_cycles = ogs_crypto_now_cycles();
+#endif
                     edhoc_rc = responder_process_message_1(
                             &ausf_ue->edhoc_responder,
                             &message_from_ue, &c_i, &ead_1);
+                    t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                    t1_cycles = ogs_crypto_now_cycles();
+                    ogs_log_edhoc_crypto("responder_process_message_1",
+                            t1_ns - t0_ns, t1_cycles - t0_cycles,
+                            ausf_ue->suci);
+#else
+                    ogs_log_edhoc_crypto("responder_process_message_1",
+                            t1_ns - t0_ns, 0, ausf_ue->suci);
+#endif
+                }
+
                 if (edhoc_rc == 0)
                     edhoc_rc = credential_new_symmetric(&cred_r,
                             ausf_self()->edhoc.credential,
                             ausf_self()->edhoc.credential_len);
-                if (edhoc_rc == 0)
+                if (edhoc_rc == 0) {
+                    t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                    t0_cycles = ogs_crypto_now_cycles();
+#endif
                     edhoc_rc = responder_prepare_message_2(
                             &ausf_ue->edhoc_responder,
                             (const BytesP256ElemLen *)ausf_self()->edhoc.private_key,
                             &cred_r, ByReference,
                             &c_r, &ead_2, &message_2);
+                    t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                    t1_cycles = ogs_crypto_now_cycles();
+                    ogs_log_edhoc_crypto("responder_prepare_message_2",
+                            t1_ns - t0_ns, t1_cycles - t0_cycles,
+                            ausf_ue->suci);
+#else
+                    ogs_log_edhoc_crypto("responder_prepare_message_2",
+                            t1_ns - t0_ns, 0, ausf_ue->suci);
+#endif
+                }
                 if (edhoc_rc == 0)
                     edhoc_rc = edhoc_build_eap_request_hex(
                             (uint8_t)(eap_id + 1),
@@ -388,6 +486,10 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                 /* Second EDHOC leg: parse message_3 and generate message_4.
                  * message_4 is relayed in AUTHENTICATION_ONGOING. */
                 ogs_time_t leg2_start = ogs_time_now();
+                uint64_t t0_ns, t1_ns;
+#if OGS_HAVE_CPU_CYCLES
+                uint64_t t0_cycles, t1_cycles;
+#endif
                 memset(&ead_3, 0, sizeof(ead_3));
                 memset(&ead_4, 0, sizeof(ead_4));
                 memset(&message_4, 0, sizeof(message_4));
@@ -419,10 +521,25 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                     ogs_error("EDHOC: message_3 too short for UE[%s] [len=%zu]",
                             ausf_ue->suci, (size_t)message_from_ue.len);
                 } else {
+                    t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                    t0_cycles = ogs_crypto_now_cycles();
+#endif
                     edhoc_rc = responder_parse_message_3_with_cred_resolver(
                             &ausf_ue->edhoc_responder,
                             &message_from_ue, &id_cred_i, &ead_3,
                             edhoc_resolve_cred_i, &resolver_ctx);
+                    t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                    t1_cycles = ogs_crypto_now_cycles();
+                    ogs_log_edhoc_crypto("responder_parse_message_3",
+                            t1_ns - t0_ns, t1_cycles - t0_cycles,
+                            ausf_ue->suci);
+#else
+                    ogs_log_edhoc_crypto("responder_parse_message_3",
+                            t1_ns - t0_ns, 0, ausf_ue->suci);
+#endif
+
                     if (edhoc_rc != 0) {
                         ausf_ue->auth_result =
                             OpenAPI_auth_result_AUTHENTICATION_FAILURE;
@@ -432,13 +549,43 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                         edhoc_rc = credential_new_symmetric(
                                 &cred_i_expected,
                                 resolver_ctx.cred, resolver_ctx.cred_len);
-                        if (edhoc_rc == 0)
+                        if (edhoc_rc == 0) {
+                            t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                            t0_cycles = ogs_crypto_now_cycles();
+#endif
                             edhoc_rc = responder_verify_message_3(
                                     &ausf_ue->edhoc_responder,
                                     &cred_i_expected, &prk_out);
-                        if (edhoc_rc == 0)
+                            t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                            t1_cycles = ogs_crypto_now_cycles();
+                            ogs_log_edhoc_crypto("responder_verify_message_3",
+                                    t1_ns - t0_ns, t1_cycles - t0_cycles,
+                                    ausf_ue->suci);
+#else
+                            ogs_log_edhoc_crypto("responder_verify_message_3",
+                                    t1_ns - t0_ns, 0, ausf_ue->suci);
+#endif
+                        }
+                        if (edhoc_rc == 0) {
+                            t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                            t0_cycles = ogs_crypto_now_cycles();
+#endif
                             edhoc_rc = responder_prepare_message_4(
                                 &ausf_ue->edhoc_responder, &ead_4, &message_4);
+                            t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+                            t1_cycles = ogs_crypto_now_cycles();
+                            ogs_log_edhoc_crypto("responder_prepare_message_4",
+                                    t1_ns - t0_ns, t1_cycles - t0_cycles,
+                                    ausf_ue->suci);
+#else
+                            ogs_log_edhoc_crypto("responder_prepare_message_4",
+                                    t1_ns - t0_ns, 0, ausf_ue->suci);
+#endif
+                        }
                         if (edhoc_rc == 0)
                             edhoc_rc = edhoc_build_eap_request_hex(
                                     (uint8_t)(eap_id + 1),

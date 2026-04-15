@@ -19,6 +19,52 @@
 
 #include "nudr-handler.h"
 #include "sbi-path.h"
+#include <stdint.h>
+#include <time.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <x86intrin.h>
+#define OGS_HAVE_CPU_CYCLES 1
+#else
+#define OGS_HAVE_CPU_CYCLES 0
+#endif
+
+#ifndef CLOCK_MONOTONIC_RAW
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
+
+static inline uint64_t ogs_crypto_now_ns(void)
+{
+    struct timespec ts;
+
+    ogs_assert(clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0);
+    return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+}
+
+#if OGS_HAVE_CPU_CYCLES
+static inline uint64_t ogs_crypto_now_cycles(void)
+{
+    unsigned int aux;
+
+    return __rdtscp(&aux);
+}
+#endif
+
+static void ogs_log_aka_crypto(
+        const char *label, uint64_t elapsed_ns, uint64_t elapsed_cycles,
+        const char *suci)
+{
+#if OGS_HAVE_CPU_CYCLES
+    ogs_info("AKA_CRYPTO: %s %llu ns %llu cycles UE[%s]",
+            label,
+            (unsigned long long)elapsed_ns,
+            (unsigned long long)elapsed_cycles,
+            suci);
+#else
+    (void)elapsed_cycles;
+    ogs_info("AKA_CRYPTO: %s %llu ns N/A cycles UE[%s]",
+            label, (unsigned long long)elapsed_ns, suci);
+#endif
+}
 
 static bool edhoc_set_vector_from_subscription(
     const OpenAPI_authentication_subscription_t *subscription,
@@ -317,24 +363,63 @@ bool udm_nudr_dr_handle_subscription_authentication(
             else step = 0;
 #endif
 #endif
-
+            uint64_t t0_ns, t1_ns;
+#if OGS_HAVE_CPU_CYCLES
+            uint64_t t0_cycles, t1_cycles;
+#endif
+            t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+            t0_cycles = ogs_crypto_now_cycles();
+#endif
             milenage_generate(udm_ue->opc, udm_ue->amf, udm_ue->k, udm_ue->sqn,
                     udm_ue->rand, autn, ik, ck, ak, xres, &xres_len);
-
+            t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+            t1_cycles = ogs_crypto_now_cycles();
+            ogs_log_aka_crypto("milenage_generate", t1_ns - t0_ns,
+                    t1_cycles - t0_cycles, udm_ue->suci);
+#else
+            ogs_log_aka_crypto("milenage_generate", t1_ns - t0_ns,
+                    0, udm_ue->suci);
+#endif
             ogs_assert(udm_ue->serving_network_name);
 
             /* TS33.501 Annex A.2 : Kausf derviation function */
+            t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+            t0_cycles = ogs_crypto_now_cycles();
+#endif
             ogs_kdf_kausf(
                     ck, ik,
                     udm_ue->serving_network_name, autn,
                     kausf);
+            t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+            t1_cycles = ogs_crypto_now_cycles();
+            ogs_log_aka_crypto("kdf_kausf", t1_ns - t0_ns,
+                    t1_cycles - t0_cycles, udm_ue->suci);
+#else
+            ogs_log_aka_crypto("kdf_kausf", t1_ns - t0_ns, 0, udm_ue->suci);
+#endif
 
             /* TS33.501 Annex A.4 : RES* and XRES* derivation function */
+            t0_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+            t0_cycles = ogs_crypto_now_cycles();
+#endif
             ogs_kdf_xres_star(
                     ck, ik,
                     udm_ue->serving_network_name, udm_ue->rand, xres, xres_len,
                     xres_star);
-
+            t1_ns = ogs_crypto_now_ns();
+#if OGS_HAVE_CPU_CYCLES
+            t1_cycles = ogs_crypto_now_cycles();
+            ogs_log_aka_crypto("kdf_xres_star", t1_ns - t0_ns,
+                    t1_cycles - t0_cycles, udm_ue->suci);
+#else
+            ogs_log_aka_crypto("kdf_xres_star", t1_ns - t0_ns,
+                    0, udm_ue->suci);
+#endif
             memset(&AuthenticationVector, 0, sizeof(AuthenticationVector));
             AuthenticationVector.av_type = OpenAPI_av_type_5G_HE_AKA;
 
