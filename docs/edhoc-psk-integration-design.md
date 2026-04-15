@@ -44,6 +44,8 @@ The fundamental design decision is how to map EDHOC's two-party model onto the 5
 
 This mapping preserves the 5G trust model: the AMF never sees authentication secrets, and the UDM/UDR remains the authoritative source of subscriber credentials. The AUSF maintains EDHOC session state across multiple SBI round-trips.
 
+This role assignment is consistent with TS 33.501 Section 6.1.1.2, which specifies that for EAP-based authentication methods within the 5G system, the UE takes the role of EAP peer and the AUSF takes the role of backend authentication server. Although this PoC does not implement a full EAP method (it reuses EAP Notification as a carrier — see Section 5.2), the trust topology follows the same normative structure: the UE is the party that initiates the authentication exchange (EDHOC Initiator / EAP peer), and the AUSF is the party that holds server-side state and validates the peer's credentials (EDHOC Responder / EAP backend). The AMF, consistent with its role in TS 33.501, acts as an EAP pass-through between the UE and the AUSF.
+
 ### 2.2 Why the AMF is a Relay (Not a Participant)
 
 In standard 5G-AKA, the AMF performs partial authentication validation (HXRES* verification) before forwarding the result to the AUSF. For EDHOC-PSK, the AMF cannot participate in the cryptographic exchange because:
@@ -118,7 +120,7 @@ UE (Initiator)          AMF (Relay)            AUSF (Responder)         UDM/UDR
 
 When the UE sends a Registration Request, the AMF queries the AUSF, which queries the UDM. The UDM reads the subscriber's `authentication_method` field from the UDR (MongoDB). If the subscriber is provisioned with `EDHOC_PSK`, the UDM returns an `AuthenticationInfoResult` with `auth_type = EDHOC_PSK`, along with the subscriber's EDHOC credentials (kid and CRED_I in CCS format) carried in the `AuthenticationVector`.
 
-This is the point at which the entire NF chain learns that this subscriber uses EDHOC instead of AKA. The decision propagates: UDM -> AUSF -> AMF, and each NF branches its logic accordingly.
+This is the point at which the entire NF chain learns that this subscriber uses EDHOC instead of AKA. The decision propagates: UDM -> AUSF -> AMF, and each NF branches its logic accordingly. This is compliant with TS 33.501 Section 6.1.2, which states that "it is the home network's decision which authentication method is selected." In the 5G architecture, the home network is represented by the UDM/UDR and AUSF — the UDM reads the operator-provisioned `authentication_method` from the subscriber record in the UDR and selects the method accordingly, while the serving network (AMF) and the UE follow the home network's selection.
 
 #### Phase 1: Bootstrap (EDHOC-START)
 
@@ -194,16 +196,55 @@ CK (Cipher Key) and IK (Integrity Key) are artifacts of the USIM/Milenage algori
 
 ### 4.4 Security Considerations for Key Derivation
 
-<!-- POINT TO EXPAND: Discuss the security properties of this derivation:
-     - Forward secrecy: EDHOC provides it via ephemeral DH; 5G-AKA does not.
-     - Key confirmation: EDHOC message_3/message_4 provide mutual key confirmation;
-       5G-AKA relies on HXRES*/RES* comparison.
-     - Binding to serving network: The KSEAF derivation binds to serving_network_name,
-       preserving the 5G anti-bidding-down property.
-     - Empty context trade-off: Without EAP type binding, the EMSK is not bound to the
-       transport method. Discuss whether this matters in practice (the EDHOC transcript
-       already provides strong binding to the session).
--->
+This section discusses how the EDHOC-PSK key derivation preserves the security properties required by the 3GPP specifications, and where it differs from 5G-AKA.
+
+#### 4.4.1 Compliance with the 3GPP Key Hierarchy
+
+The 5G key hierarchy defined in TS 33.501 is designed to be modular: the derivation of KSEAF from KAUSF, KAMF from KSEAF, and the NAS/AS keys from KAMF are all independent of the authentication method that produced KAUSF. TS 33.501 Section 6.1.3 defines two paths into KAUSF:
+
+- **5G-AKA path**: KAUSF is derived from CK' and IK' (which come from Milenage/TUAK via CK and IK), with the serving network name as a KDF input (TS 33.501 Annex A.2).
+- **EAP-based path**: KAUSF is derived from the EMSK exported by the EAP method. For EAP-AKA', this is specified in RFC 9048; for EAP-EDHOC, this follows draft-ietf-emu-eap-edhoc-08 Section 5.3.
+
+This implementation follows the EAP-based path: it derives EMSK via `EDHOC_Exporter` and extracts KAUSF as the first 256 bits. Once KAUSF is established, the standard 3GPP KDFs apply without modification:
+
+```
+KSEAF = KDF(KAUSF, serving_network_name)     [TS 33.501, Annex A.6]
+KAMF  = KDF(KSEAF, SUPI, ABBA)              [TS 33.501, Annex A.7]
+```
+
+Because the injection point is KAUSF — the boundary between authentication-method-specific and authentication-method-independent key derivation — everything below KAUSF remains fully compliant with the 3GPP specifications regardless of whether KAUSF was produced by Milenage, TUAK, or EDHOC.
+
+#### 4.4.2 Serving Network Binding
+
+TS 33.501 Section 6.1.2 requires that "the primary authentication and key agreement procedures shall bind the KSEAF to the serving network," preventing one serving network from claiming to be a different serving network (implicit serving network authentication).
+
+This property is preserved in EDHOC-PSK through the standard `ogs_kdf_kseaf` derivation (TS 33.501 Annex A.6), which takes the serving network name as a KDF input:
+
+```
+KSEAF = KDF(KAUSF, serving_network_name)
+```
+
+The serving network name is constructed as `"5G:mnc<MNC>.mcc<MCC>.3gppnetwork.org"` from the serving PLMN ID (TS 24.501). In the implementation:
+
+1. The **AMF** constructs the serving network name from the PLMN ID of the cell the UE registered in (`amf_ue->nr_tai.plmn_id`) and sends it to the AUSF in the `AuthenticationInfo` message.
+2. The **AUSF** stores the serving network name and uses it when deriving KSEAF after authentication completes.
+3. The **UE** independently constructs the same serving network name from the PLMN ID it selected during cell selection, and derives its own KSEAF locally.
+
+If a malicious serving network A impersonates serving network B, the AMF would construct the serving network name using A's PLMN ID (since the AMF uses its own configured identity). The UE, however, would derive KSEAF using B's PLMN ID (the network it believes it is connecting to). The resulting KSEAF values would not match, causing Security Mode Command to fail. This is the same protection mechanism as in 5G-AKA — the binding operates on KAUSF regardless of the authentication method that produced it.
+
+#### 4.4.3 Forward Secrecy
+
+Unlike 5G-AKA, where all keys are derived from the permanent key K stored on the USIM (meaning compromise of K compromises all past and future sessions), EDHOC-PSK provides **forward secrecy** through its ephemeral Diffie-Hellman exchange. Even if the pre-shared key is compromised after a session, the session keys (PRK_out, and by extension KAUSF, KSEAF, KAMF) cannot be recovered because they depend on ephemeral DH values that are discarded after the exchange. This is a security improvement over 5G-AKA that the 3GPP key hierarchy inherits transparently.
+
+#### 4.4.4 Mutual Key Confirmation
+
+In 5G-AKA, key confirmation is asymmetric: the network confirms the UE's identity via HXRES*/RES* comparison, and the UE confirms the network's identity by verifying AUTN (which proves the network knows the permanent key K). EDHOC-PSK provides stronger mutual key confirmation through the protocol messages themselves: message_3 confirms the Initiator's identity to the Responder, and message_4 (mandatory in EDHOC-PSK) confirms the Responder's identity to the Initiator. Both confirmations are cryptographically bound to the established session key, meaning each party has proof that the other has derived the same shared secret.
+
+#### 4.4.5 Empty Exporter Context Trade-off
+
+The EAP-EDHOC specification (draft-ietf-emu-eap-edhoc-08) binds the EMSK to the EAP method type code via the `context` parameter of `EDHOC_Exporter`. Since this implementation does not use a registered EAP method (it uses EAP Notification as a transport — see Section 5.2), the exporter context is left empty.
+
+This means the EMSK is not bound to a specific transport method identifier. However, the EMSK is still cryptographically bound to the full EDHOC transcript hash, which includes both parties' ephemeral public keys, connection identifiers, and credential identifiers. In practice, this provides equivalent session binding — the EMSK is unique to this specific EDHOC session regardless of the EAP carrier used. A production implementation using the full EAP-EDHOC method (with a registered EAP type code) would include the type code in the context, providing an additional layer of method binding.
 
 ---
 
