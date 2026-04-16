@@ -68,6 +68,34 @@ jobs:
           sudo apt install python3-pip python3-setuptools python3-wheel ninja-build build-essential flex bison git libsctp-dev libgnutls28-dev libgcrypt-dev libssl-dev libidn11-dev libmongoc-dev libbson-dev libyaml-dev libnghttp2-dev libmicrohttpd-dev libcurl4-gnutls-dev libnghttp2-dev libtins-dev libtalloc-dev meson
     - name: Check out repository code
       uses: actions/checkout@main
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install cbindgen
+      run: cargo install cbindgen --version 0.24.5 --locked
+    - name: Check out lakers
+      uses: actions/checkout@v4
+      with:
+        repository: ElsaLopez133/lakers
+        ref: edhoc-psk-open5gs
+        path: lakers
+    - name: Build lakers_c and configure pkg-config
+      run: |
+          cd lakers/lakers-c
+          ./build.sh crypto-rustcrypto
+        
+          cat > ../target/lakers.pc << 'EOF'
+          prefix=${pcfiledir}
+          includedir=${prefix}/include
+          libdir=${prefix}/x86_64-unknown-linux-gnu/release
+
+          Name: lakers
+          Description: LAKERS C bindings
+          Version: 1.0
+          Cflags: -I${includedir}
+          Libs: -L${libdir} -llakers_c
+          EOF
+
+          echo "PKG_CONFIG_PATH=${GITHUB_WORKSPACE}/lakers/target" >> "${GITHUB_ENV}"
     - name: Setup Meson Build
       run: meson setup build
       env:

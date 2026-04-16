@@ -4,6 +4,25 @@
 
 Please follow the [documentation](https://open5gs.org/open5gs/docs/) at [open5gs.org](https://open5gs.org/)!
 
+## Local Lakers Build
+
+For local EDHOC/Lakers builds, this repository includes
+`meson-lakers.ini`, which sets:
+- `pkg_config_path` to your local `lakers.pc`
+- `prefix` to `open5gs/install`
+
+One-time setup:
+```bash
+meson setup build --native-file meson-lakers.ini
+```
+
+Then normal builds:
+```bash
+ninja -C build
+```
+
+If you delete `build/`, run the `meson setup ... --native-file ...` command again.
+
 ## Sponsors
 
 If you find Open5GS useful for work, please consider supporting this Open Source project by [Becoming a sponsor](https://github.com/sponsors/acetcom). To manage the funding transactions transparently, you can donate through [OpenCollective](https://opencollective.com/open5gs).
