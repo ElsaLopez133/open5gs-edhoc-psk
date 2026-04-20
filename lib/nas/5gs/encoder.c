@@ -1927,6 +1927,16 @@ int ogs_nas_5gs_encode_authentication_request(ogs_pkbuf_t *pkbuf, ogs_nas_5gs_me
         encoded += size;
     }
 
+    if (authentication_request->presencemask & OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_PRESENT) {
+        size = ogs_nas_5gs_encode_optional_type(pkbuf, OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_TYPE);
+        ogs_assert(size >= 0);
+        encoded += size;
+
+        size = ogs_nas_5gs_encode_edhoc_payload(pkbuf, &authentication_request->edhoc_payload);
+        ogs_assert(size >= 0);
+        encoded += size;
+    }
+
     return encoded;
 }
 
@@ -1954,6 +1964,16 @@ int ogs_nas_5gs_encode_authentication_response(ogs_pkbuf_t *pkbuf, ogs_nas_5gs_m
         encoded += size;
 
         size = ogs_nas_5gs_encode_eap_message(pkbuf, &authentication_response->eap_message);
+        ogs_assert(size >= 0);
+        encoded += size;
+    }
+
+    if (authentication_response->presencemask & OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EDHOC_PAYLOAD_PRESENT) {
+        size = ogs_nas_5gs_encode_optional_type(pkbuf, OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EDHOC_PAYLOAD_TYPE);
+        ogs_assert(size >= 0);
+        encoded += size;
+
+        size = ogs_nas_5gs_encode_edhoc_payload(pkbuf, &authentication_response->edhoc_payload);
         ogs_assert(size >= 0);
         encoded += size;
     }

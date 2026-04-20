@@ -751,9 +751,11 @@ typedef struct ogs_nas_5gs_configuration_update_command_s {
 #define OGS_NAS_5GS_AUTHENTICATION_REQUEST_AUTHENTICATION_PARAMETER_RAND_PRESENT ((uint64_t)1<<0)
 #define OGS_NAS_5GS_AUTHENTICATION_REQUEST_AUTHENTICATION_PARAMETER_AUTN_PRESENT ((uint64_t)1<<1)
 #define OGS_NAS_5GS_AUTHENTICATION_REQUEST_EAP_MESSAGE_PRESENT ((uint64_t)1<<2)
+#define OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_PRESENT ((uint64_t)1<<3)
 #define OGS_NAS_5GS_AUTHENTICATION_REQUEST_AUTHENTICATION_PARAMETER_RAND_TYPE 0x21
 #define OGS_NAS_5GS_AUTHENTICATION_REQUEST_AUTHENTICATION_PARAMETER_AUTN_TYPE 0x20
 #define OGS_NAS_5GS_AUTHENTICATION_REQUEST_EAP_MESSAGE_TYPE 0x78
+#define OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_TYPE 0x7D
 
 typedef struct ogs_nas_5gs_authentication_request_s {
     /* Mandatory fields */
@@ -765,6 +767,7 @@ typedef struct ogs_nas_5gs_authentication_request_s {
     ogs_nas_authentication_parameter_rand_t authentication_parameter_rand;
     ogs_nas_authentication_parameter_autn_t authentication_parameter_autn;
     ogs_nas_eap_message_t eap_message;
+    ogs_nas_edhoc_payload_t edhoc_payload;
 } ogs_nas_5gs_authentication_request_t;
 
 
@@ -773,8 +776,10 @@ typedef struct ogs_nas_5gs_authentication_request_s {
  ******************************************************/
 #define OGS_NAS_5GS_AUTHENTICATION_RESPONSE_AUTHENTICATION_RESPONSE_PARAMETER_PRESENT ((uint64_t)1<<0)
 #define OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EAP_MESSAGE_PRESENT ((uint64_t)1<<1)
+#define OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EDHOC_PAYLOAD_PRESENT ((uint64_t)1<<2)
 #define OGS_NAS_5GS_AUTHENTICATION_RESPONSE_AUTHENTICATION_RESPONSE_PARAMETER_TYPE 0x2D
 #define OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EAP_MESSAGE_TYPE 0x78
+#define OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EDHOC_PAYLOAD_TYPE 0x7D
 
 typedef struct ogs_nas_5gs_authentication_response_s {
 
@@ -782,6 +787,7 @@ typedef struct ogs_nas_5gs_authentication_response_s {
     uint64_t presencemask;
     ogs_nas_authentication_response_parameter_t authentication_response_parameter;
     ogs_nas_eap_message_t eap_message;
+    ogs_nas_edhoc_payload_t edhoc_payload;
 } ogs_nas_5gs_authentication_response_t;
 
 

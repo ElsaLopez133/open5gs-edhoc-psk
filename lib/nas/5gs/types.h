@@ -50,6 +50,13 @@ typedef struct ogs_nas_eap_message_s {
     void *buffer;
 } ogs_nas_eap_message_t;
 
+/* EDHOC payload (non-standard PoC IE for EDHOC-PSK integration)
+ * O TLV-E 4-N, IEI 0x7D */
+typedef struct ogs_nas_edhoc_payload_s {
+    uint16_t length;
+    void *buffer;
+} ogs_nas_edhoc_payload_t;
+
 /* 9.11.2.8 S-NSSAI
  * O TLV 3-10 */
 #define OGS_NAS_S_NSSAI_SST_LEN 1
