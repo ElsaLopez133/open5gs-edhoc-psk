@@ -952,7 +952,6 @@ int gmm_handle_authentication_response(amf_ue_t *amf_ue,
 {
     ogs_nas_authentication_response_parameter_t
         *authentication_response_parameter = NULL;
-    ogs_nas_eap_message_t *eap_message = NULL;
     uint8_t hxres_star[OGS_MAX_RES_LEN];
     int r;
 
@@ -967,29 +966,51 @@ int gmm_handle_authentication_response(amf_ue_t *amf_ue,
     CLEAR_AMF_UE_TIMER(amf_ue->t3560);
 
     /*
-     * this is the AMF-side handoff of the UE’s EDHOC message back to AUSF,
-     * using the existing NAS Authentication Response path.
+     * AMF-side handoff of the UE's EDHOC message back to AUSF.
+     * The UE sends raw EDHOC bytes in the new EDHOC Payload IE (0x7D).
+     * For SBI (N12), the AUSF still expects EAP-wrapped bytes, so we
+     * re-wrap here at the N1<->N12 boundary.
      */
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        // This takes the eap_message field from the NAS Authentication Response.
-        // It uses the NAS EAP container as the place where the UE sends back.
-        // This is transport reuse.
-        eap_message = &authentication_response->eap_message;
+        ogs_nas_edhoc_payload_t *edhoc_payload =
+            &authentication_response->edhoc_payload;
+        /* Max EDHOC-PSK message ~40B; 1024 leaves ample room. */
+        static uint8_t eap_buf[1024];
+        ogs_nas_eap_message_t eap_wrapper;
+        size_t total_len;
+
         if (!(authentication_response->presencemask &
-                OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EAP_MESSAGE_PRESENT) ||
-            !eap_message->buffer || !eap_message->length) {
-            ogs_error("[%s] No EAP message for EDHOC_PSK", amf_ue->suci);
+                OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EDHOC_PAYLOAD_PRESENT)) {
+            ogs_error("[%s] No EDHOC payload for EDHOC_PSK", amf_ue->suci);
             return OGS_ERROR;
         }
-        // “Take the EDHOC payload received from the UE over NAS and send
-        // it to AUSF as the authentication confirmation/continuation message.”
-        // Even though the builder name says authenticate_confirmation,
-        // this is no longer just “AKA confirmation”;
-        // it is being reused as the generic next-step message from UE to AUSF.
+
+        total_len = 5 + edhoc_payload->length;
+        if (total_len > sizeof(eap_buf)) {
+            ogs_error("[%s] EDHOC payload too large [%u bytes]",
+                    amf_ue->suci, edhoc_payload->length);
+            return OGS_ERROR;
+        }
+
+        /* Build EAP Response Notification wrapping the raw EDHOC bytes.
+         * Code=0x02 (Response), ID=0x01, Length (big-endian, includes header),
+         * Type=0x02 (Notification). */
+        eap_buf[0] = 0x02;
+        eap_buf[1] = 0x01;
+        eap_buf[2] = (total_len >> 8) & 0xff;
+        eap_buf[3] = total_len & 0xff;
+        eap_buf[4] = 0x02;
+        if (edhoc_payload->length > 0 && edhoc_payload->buffer) {
+            memcpy(eap_buf + 5, edhoc_payload->buffer, edhoc_payload->length);
+        }
+
+        eap_wrapper.length = total_len;
+        eap_wrapper.buffer = eap_buf;
+
         r = amf_ue_sbi_discover_and_send(
                 OGS_SBI_SERVICE_TYPE_NAUSF_AUTH, NULL,
                 amf_nausf_auth_build_authenticate_confirmation,
-                amf_ue, 0, eap_message);
+                amf_ue, 0, &eap_wrapper);
         ogs_expect(r == OGS_OK);
         ogs_assert(r != OGS_ERROR);
 

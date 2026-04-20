@@ -353,10 +353,6 @@ ogs_pkbuf_t *gmm_build_identity_request(amf_ue_t *amf_ue)
 
 ogs_pkbuf_t *gmm_build_authentication_request(amf_ue_t *amf_ue)
 {
-    static uint8_t edhoc_dummy_start[] = {
-        0x01, 0x01, 0x00, 0x10, 0x02,
-        'E', 'D', 'H', 'O', 'C', '-', 'S', 'T', 'A', 'R', 'T'
-    };
     ogs_nas_5gs_message_t message;
     ogs_nas_5gs_authentication_request_t *authentication_request =
         &message.gmm.authentication_request;
@@ -374,23 +370,31 @@ ogs_pkbuf_t *gmm_build_authentication_request(amf_ue_t *amf_ue)
     memcpy(authentication_request->abba.value, amf_ue->abba, amf_ue->abba_len);
 
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        /* EDHOC on N1 reuses NAS Authentication Request + EAP payload:
-         * first round sends bootstrap marker, later rounds relay message_2 bytes. */
+        /* EDHOC on N1 uses the dedicated EDHOC Payload IE (0x7D, TLV-E).
+         * Bootstrap: zero-length IE signals EDHOC-START.
+         * Relay rounds: strip the 5-byte EAP header that the AUSF added on
+         * N12 (AUSF side still uses EAP-wrapped SBI for now) and forward
+         * raw EDHOC CBOR bytes in the NAS IE. */
         ogs_info("EDHOC: sending authentication request for UE[%s] [%s]",
                 amf_ue->suci ? amf_ue->suci : "(unknown)",
-                amf_ue->edhoc_n1_relay.payload_len ? "relay payload" : "dummy start");
+                amf_ue->edhoc_n1_relay.payload_len ? "relay payload" : "bootstrap");
         authentication_request->presencemask |=
-            OGS_NAS_5GS_AUTHENTICATION_REQUEST_EAP_MESSAGE_PRESENT;
+            OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_PRESENT;
         if (amf_ue->edhoc_n1_relay.payload_len) {
-            authentication_request->eap_message.length =
-                amf_ue->edhoc_n1_relay.payload_len;
-            authentication_request->eap_message.buffer =
-                amf_ue->edhoc_n1_relay.payload;
+            /* EAP header is 5 bytes: Code | ID | Length(2) | Type. */
+            if (amf_ue->edhoc_n1_relay.payload_len < 5) {
+                ogs_error("EDHOC: relay payload too short to strip EAP header "
+                        "[%zu bytes]", amf_ue->edhoc_n1_relay.payload_len);
+                return NULL;
+            }
+            authentication_request->edhoc_payload.length =
+                amf_ue->edhoc_n1_relay.payload_len - 5;
+            authentication_request->edhoc_payload.buffer =
+                amf_ue->edhoc_n1_relay.payload + 5;
             amf_ue->edhoc_n1_relay.payload_len = 0;
         } else {
-            authentication_request->eap_message.length =
-                sizeof(edhoc_dummy_start);
-            authentication_request->eap_message.buffer = edhoc_dummy_start;
+            authentication_request->edhoc_payload.length = 0;
+            authentication_request->edhoc_payload.buffer = NULL;
         }
         return ogs_nas_5gs_plain_encode(&message);
     }
