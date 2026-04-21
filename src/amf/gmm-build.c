@@ -372,25 +372,17 @@ ogs_pkbuf_t *gmm_build_authentication_request(amf_ue_t *amf_ue)
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
         /* EDHOC on N1 uses the dedicated EDHOC Payload IE (0x7D, TLV-E).
          * Bootstrap: zero-length IE signals EDHOC-START.
-         * Relay rounds: strip the 5-byte EAP header that the AUSF added on
-         * N12 (AUSF side still uses EAP-wrapped SBI for now) and forward
-         * raw EDHOC CBOR bytes in the NAS IE. */
+         * Relay rounds: forward raw EDHOC CBOR bytes received from AUSF. */
         ogs_info("EDHOC: sending authentication request for UE[%s] [%s]",
                 amf_ue->suci ? amf_ue->suci : "(unknown)",
                 amf_ue->edhoc_n1_relay.payload_len ? "relay payload" : "bootstrap");
         authentication_request->presencemask |=
             OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_PRESENT;
         if (amf_ue->edhoc_n1_relay.payload_len) {
-            /* EAP header is 5 bytes: Code | ID | Length(2) | Type. */
-            if (amf_ue->edhoc_n1_relay.payload_len < 5) {
-                ogs_error("EDHOC: relay payload too short to strip EAP header "
-                        "[%zu bytes]", amf_ue->edhoc_n1_relay.payload_len);
-                return NULL;
-            }
             authentication_request->edhoc_payload.length =
-                amf_ue->edhoc_n1_relay.payload_len - 5;
+                amf_ue->edhoc_n1_relay.payload_len;
             authentication_request->edhoc_payload.buffer =
-                amf_ue->edhoc_n1_relay.payload + 5;
+                amf_ue->edhoc_n1_relay.payload;
             amf_ue->edhoc_n1_relay.payload_len = 0;
         } else {
             authentication_request->edhoc_payload.length = 0;

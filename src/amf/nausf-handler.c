@@ -255,13 +255,13 @@ int amf_nausf_auth_handle_authenticate_confirmation(
         /* Ongoing EDHOC leg: AMF receives tunneled EDHOC payload (message_2/message_4)
          * from AUSF (N12), stores raw bytes, then triggers NAS Authentication Request (N1). */
 
-        if (!ConfirmationDataResponse->edhoc_eap_payload) {
+        if (!ConfirmationDataResponse->edhoc_payload) {
             ogs_error("[%s] No tunneled EDHOC payload", amf_ue->suci);
             return OGS_ERROR;
         }
 
-        payload_len = strlen(ConfirmationDataResponse->edhoc_eap_payload);
-        if (payload_len == 0 || (payload_len % 2) != 0) {
+        payload_len = strlen(ConfirmationDataResponse->edhoc_payload);
+        if ((payload_len % 2) != 0) {
             ogs_error("[%s] Invalid tunneled EDHOC payload length [%d]",
                     amf_ue->suci, payload_len);
             return OGS_ERROR;
@@ -274,13 +274,14 @@ int amf_nausf_auth_handle_authenticate_confirmation(
             return OGS_ERROR;
         }
 
-        ogs_ascii_to_hex(ConfirmationDataResponse->edhoc_eap_payload,
-                strlen(ConfirmationDataResponse->edhoc_eap_payload),
-                amf_ue->edhoc_n1_relay.payload,
-                sizeof(amf_ue->edhoc_n1_relay.payload));
+        if (payload_len > 0)
+            ogs_ascii_to_hex(ConfirmationDataResponse->edhoc_payload,
+                    strlen(ConfirmationDataResponse->edhoc_payload),
+                    amf_ue->edhoc_n1_relay.payload,
+                    sizeof(amf_ue->edhoc_n1_relay.payload));
         amf_ue->edhoc_n1_relay.payload_len = payload_len;
 
-        ogs_info("EDHOC: relaying EDHOC payload to UE[%s] [%d bytes EAP]",
+        ogs_info("EDHOC: relaying EDHOC payload to UE[%s] [%d bytes]",
                 amf_ue->suci ? amf_ue->suci : "(unknown)", payload_len);
 
         r = nas_5gs_send_authentication_request(amf_ue);

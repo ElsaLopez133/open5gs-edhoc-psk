@@ -34,7 +34,6 @@
 #define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
 #endif
 
-#define EDHOC_EAP_NOTIFICATION_TYPE 0x02
 #define EDHOC_EXPORTER_LABEL_MSK 26
 #define EDHOC_EXPORTER_LABEL_EMSK 27
 #define EDHOC_EXPORTER_KEY_LEN 64
@@ -152,79 +151,53 @@ static int8_t edhoc_resolve_cred_i(
     return credential_new_symmetric(cred_out, ctx->cred, ctx->cred_len);
 }
 
-static bool edhoc_extract_message_from_eap(
-        const char *hex_payload, EdhocMessageBuffer *message, uint8_t *eap_id)
+/* Decode hex EDHOC payload received over SBI into raw EDHOC CBOR bytes. */
+static bool edhoc_decode_hex_payload(
+        const char *hex_payload, EdhocMessageBuffer *message)
 {
-    uint8_t payload[256];
-    int eap_length;
-    int payload_len;
+    int hex_len;
+    int raw_len;
 
     ogs_assert(hex_payload);
     ogs_assert(message);
 
     memset(message, 0, sizeof(*message));
 
-    payload_len = strlen(hex_payload);
-    if (payload_len == 0 || (payload_len % 2) != 0)
+    hex_len = strlen(hex_payload);
+    if ((hex_len % 2) != 0)
         return false;
 
-    payload_len /= 2;
-    if (payload_len < 5 || payload_len > (int)sizeof(payload))
+    raw_len = hex_len / 2;
+    if (raw_len > (int)sizeof(message->content))
         return false;
 
-    ogs_ascii_to_hex((char *)hex_payload, strlen(hex_payload),
-            payload, sizeof(payload));
+    if (raw_len > 0)
+        ogs_ascii_to_hex((char *)hex_payload, hex_len,
+                message->content, sizeof(message->content));
 
-    eap_length = ((int)payload[2] << 8) | payload[3];
-    if (eap_length != payload_len)
-        return false;
-
-    /* We currently carry EDHOC in EAP Notification packets. */
-    if (payload[0] != 0x02 || payload[4] != EDHOC_EAP_NOTIFICATION_TYPE)
-        return false;
-
-    if ((payload_len - 5) < 0 ||
-        (payload_len - 5) > (int)sizeof(message->content))
-        return false;
-
-    if (eap_id)
-        *eap_id = payload[1];
-
-    message->len = payload_len - 5;
-    if (message->len > 0)
-        memcpy(message->content, payload + 5, message->len);
-
+    message->len = raw_len;
     return true;
 }
 
-static bool edhoc_build_eap_request_hex(
-        uint8_t eap_id, const EdhocMessageBuffer *message, char **hex_payload)
+/* Encode raw EDHOC CBOR bytes into a hex string for SBI transport. */
+static char *edhoc_encode_hex_payload(const EdhocMessageBuffer *message)
 {
-    uint8_t eap_packet[512];
-    int eap_packet_len;
+    char *hex_payload;
+    size_t hex_len;
 
     ogs_assert(message);
+
+    hex_len = (size_t)message->len * 2 + 1;
+    hex_payload = ogs_malloc(hex_len);
     ogs_assert(hex_payload);
 
-    *hex_payload = NULL;
+    if (message->len > 0)
+        ogs_hex_to_ascii(message->content, message->len,
+                hex_payload, hex_len);
+    else
+        hex_payload[0] = '\0';
 
-    if (message->len == 0 || message->len > (sizeof(eap_packet) - 5))
-        return false;
-
-    eap_packet_len = 5 + message->len;
-    eap_packet[0] = 0x01; /* EAP Request */
-    eap_packet[1] = eap_id;
-    eap_packet[2] = (eap_packet_len >> 8) & 0xff;
-    eap_packet[3] = eap_packet_len & 0xff;
-    eap_packet[4] = EDHOC_EAP_NOTIFICATION_TYPE; /* EAP Notification */
-    memcpy(eap_packet + 5, message->content, message->len);
-
-    *hex_payload = ogs_malloc((eap_packet_len * 2) + 1);
-    ogs_assert(*hex_payload);
-    ogs_hex_to_ascii(eap_packet, eap_packet_len,
-            *hex_payload, (eap_packet_len * 2) + 1);
-
-    return true;
+    return hex_payload;
 }
 
 static int edhoc_derive_kausf_from_exporter(ausf_ue_t *ausf_ue)
@@ -240,13 +213,7 @@ static int edhoc_derive_kausf_from_exporter(ausf_ue_t *ausf_ue)
 
     memset(emsk, 0, sizeof(emsk));
 
-    /* This PoC runs EDHOC_PSK and only reuses EAP framing as an N1 carrier.
-     * It does not implement the standardized EAP-EDHOC method, so there is
-     * no real EAP-EDHOC type code to bind into the exporter context.
-     *
-     * For that reason the exporter context is left empty here, keeping EMSK
-     * tied to the EDHOC transcript itself rather than to the temporary EAP
-     * Notification wrapper used to relay bytes between UE and AMF/AUSF. */
+    /* Empty exporter context: EMSK is bound to the EDHOC transcript only. */
     t0_ns = ogs_crypto_now_ns();
 #if OGS_HAVE_CPU_CYCLES
     t0_cycles = ogs_crypto_now_cycles();
@@ -333,7 +300,6 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
     OpenAPI_confirmation_data_t *ConfirmationData = NULL;
     OpenAPI_confirmation_data_response_t ConfirmationDataResponse;
     char *res_star_string = NULL;
-    char *eap_payload_string = NULL;
     uint8_t res_star[OGS_KEYSTRLEN(OGS_MAX_RES_LEN)];
     int r;
 
@@ -365,23 +331,24 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         edhoc_cred_resolver_ctx_t resolver_ctx;
         uint8_t c_i = 0;
         uint8_t c_r = 0;
-        uint8_t eap_id = 0;
         char *message_2_hex = NULL;
         char *message_4_hex = NULL;
         int8_t edhoc_rc;
+        const char *edhoc_hex_payload;
 
-        eap_payload_string = ConfirmationData->eap_payload;
-        if (!eap_payload_string) {
-            ogs_error("[%s] No ConfirmationData.eapPayload", ausf_ue->suci);
+        edhoc_hex_payload = ConfirmationData->edhoc_payload;
+        if (!edhoc_hex_payload) {
+            ogs_error("[%s] No ConfirmationData.edhocPayload", ausf_ue->suci);
             ogs_assert(true ==
                 ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                    recvmsg, "No ConfirmationData.eapPayload", ausf_ue->suci, NULL));
+                    recvmsg, "No ConfirmationData.edhocPayload", ausf_ue->suci, NULL));
             return false;
         }
 
-        if (!edhoc_extract_message_from_eap(
-                    eap_payload_string, &message_from_ue, &eap_id)) {
+        if (!edhoc_decode_hex_payload(edhoc_hex_payload, &message_from_ue)) {
             ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+            ogs_error("EDHOC: invalid hex payload from AMF for UE[%s]",
+                    ausf_ue->suci);
         } else {
             if (!ausf_ue->edhoc_in_progress) {
                 /* First EDHOC leg: parse message_1 and return message_2 with
@@ -443,9 +410,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
 #endif
                 }
                 if (edhoc_rc == 0)
-                    edhoc_rc = edhoc_build_eap_request_hex(
-                            (uint8_t)(eap_id + 1),
-                            &message_2, &message_2_hex) ? 0 : -1;
+                    message_2_hex = edhoc_encode_hex_payload(&message_2);
                 ogs_info("EDHOC_TIMING: leg1_m1_m2 %lld us UE[%s]",
                     (long long)(ogs_time_now() - leg1_start),
                     ausf_ue->suci);
@@ -464,7 +429,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                     memset(&ConfirmationDataResponse, 0, sizeof(ConfirmationDataResponse));
                     ConfirmationDataResponse.auth_result =
                         OpenAPI_auth_result_AUTHENTICATION_ONGOING;
-                    ConfirmationDataResponse.edhoc_eap_payload = message_2_hex;
+                    ConfirmationDataResponse.edhoc_payload = message_2_hex;
                     ConfirmationDataResponse.supi = ausf_ue->supi;
 
                     memset(&sendmsg, 0, sizeof(sendmsg));
@@ -587,9 +552,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
 #endif
                         }
                         if (edhoc_rc == 0)
-                            edhoc_rc = edhoc_build_eap_request_hex(
-                                    (uint8_t)(eap_id + 1),
-                                    &message_4, &message_4_hex) ? 0 : -1;
+                            message_4_hex = edhoc_encode_hex_payload(&message_4);
                         if (edhoc_rc == 0)
                             edhoc_rc = edhoc_derive_kausf_from_exporter(
                                     ausf_ue) == OGS_OK ? 0 : -1;
@@ -599,7 +562,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                                     sizeof(ConfirmationDataResponse));
                             ConfirmationDataResponse.auth_result =
                                 OpenAPI_auth_result_AUTHENTICATION_ONGOING;
-                            ConfirmationDataResponse.edhoc_eap_payload = message_4_hex;
+                            ConfirmationDataResponse.edhoc_payload = message_4_hex;
                             ConfirmationDataResponse.supi = ausf_ue->supi;
 
                             memset(&sendmsg, 0, sizeof(sendmsg));
