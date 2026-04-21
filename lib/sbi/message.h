@@ -88,6 +88,7 @@ extern "C" {
 #define OGS_SBI_RESOURCE_NAME_5G_AKA                "5g-aka"
 #define OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION   "5g-aka-confirmation"
 #define OGS_SBI_RESOURCE_NAME_EAP_SESSION           "eap-session"
+#define OGS_SBI_RESOURCE_NAME_EDHOC_SESSION         "edhoc-session"
 
 #define OGS_SBI_RESOURCE_NAME_AM_DATA               "am-data"
 #define OGS_SBI_RESOURCE_NAME_SM_DATA               "sm-data"

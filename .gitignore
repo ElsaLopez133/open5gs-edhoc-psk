@@ -10,4 +10,7 @@ run_logs/
 run_pids/
 open5gs/
 
+docs/edhoc-nas-ie-and-sbi-cleanup.md
+docs/edhoc-psk-integration-design.md
+
 webui/.next

@@ -51,7 +51,7 @@ static const char *links_member_name(OpenAPI_auth_type_e auth_type)
         auth_type == OpenAPI_auth_type_EAP_AKA_PRIME) {
         return OGS_SBI_RESOURCE_NAME_5G_AKA;
     } else if (auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        return OGS_SBI_RESOURCE_NAME_EAP_SESSION;
+        return OGS_SBI_RESOURCE_NAME_EDHOC_SESSION;
     } else if (auth_type == OpenAPI_auth_type_EAP_TLS) {
         return OGS_SBI_RESOURCE_NAME_EAP_SESSION;
     }
@@ -317,15 +317,15 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
     header.api.version = (char *)OGS_SBI_API_V1;
     /*
     * The generated URI depends on the auth type:
-    *   5G-AKA → next resource is 5g-aka-confirmation
-    *   EDHOC-PSK → next resource is eap-session
+    *   5G-AKA    → next resource is 5g-aka-confirmation
+    *   EDHOC-PSK → next resource is edhoc-session
      */
     header.resource.component[0] =
             (char *)OGS_SBI_RESOURCE_NAME_UE_AUTHENTICATIONS;
     header.resource.component[1] = ausf_ue->ctx_id;
     header.resource.component[2] = (char *)(
             AuthenticationInfoResult->auth_type == OpenAPI_auth_type_EDHOC_PSK ?
-            OGS_SBI_RESOURCE_NAME_EAP_SESSION :
+            OGS_SBI_RESOURCE_NAME_EDHOC_SESSION :
             OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION);
     LinksValueSchemeValue.href = ogs_sbi_server_uri(server, &header);
     LinksValueScheme = OpenAPI_map_create(

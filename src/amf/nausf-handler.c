@@ -30,7 +30,7 @@
 int amf_nausf_auth_handle_authenticate(
         amf_ue_t *amf_ue, ogs_sbi_message_t *message)
 {
-    const char *edhoc_link_key = OGS_SBI_RESOURCE_NAME_EAP_SESSION;
+    const char *edhoc_link_key = OGS_SBI_RESOURCE_NAME_EDHOC_SESSION;
     int r;
     OpenAPI_ue_authentication_ctx_t *UeAuthenticationCtx = NULL;
     OpenAPI_ue_authentication_ctx_5g_auth_data_t *AV5G_AKA = NULL;
@@ -107,7 +107,7 @@ int amf_nausf_auth_handle_authenticate(
     *   “Where do I send the next step back in the core?”
     * That is why _links matters even for EDHOC.
     * if auth type is EDHOC_PSK, look for the link named:
-    *   eap-session
+    *   edhoc-session
     * otherwise look for
     *   5g-aka
      */
@@ -172,13 +172,14 @@ int amf_nausf_auth_handle_authenticate(
 
     // it now stores either:
     // AKA confirmation URI, or
-    // EDHOC eap-session URI
+    // EDHOC edhoc-session URI
     STORE_5G_AKA_CONFIRMATION(amf_ue, LinksValueSchemeValue->href);
 
     // EDHOC branch: send Authentication Request immediately.
-    // Even though this is not AKA, I still use the existing
-    // NAS Authentication Request message as the vehicle to start the UE-side authentication exchange.
-    // And in gmm-build.c, that Authentication Request is modified to contain an EAP payload EDHOC-START.
+    // Even though this is not AKA, I still use the existing NAS Authentication
+    // Request message as the vehicle to start the UE-side exchange.
+    // In gmm-build.c, that Authentication Request carries a zero-length
+    // EDHOC Payload IE (0x7D) as the bootstrap trigger.
     if (UeAuthenticationCtx->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
         /* Clear Security Context */
         CLEAR_SECURITY_CONTEXT(amf_ue);
