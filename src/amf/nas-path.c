@@ -92,6 +92,16 @@ int nas_5gs_send_registration_accept(amf_ue_t *amf_ue)
 
     ogs_debug("[%s] Registration accept", amf_ue->supi);
 
+    if (amf_ue->reg_start_time) {
+        ogs_time_t reg_elapsed = ogs_time_now() - amf_ue->reg_start_time;
+        ogs_info("[%s] REG_LATENCY: %s %lld us",
+            amf_ue->suci ? amf_ue->suci : amf_ue->supi,
+            amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK ?
+                "EDHOC_PSK" : "5G_AKA",
+            (long long)reg_elapsed);
+        amf_ue->reg_start_time = 0;
+    }
+
     if (amf_ue->next.m_tmsi) {
         if (amf_ue->t3550.pkbuf) {
             gmmbuf = amf_ue->t3550.pkbuf;

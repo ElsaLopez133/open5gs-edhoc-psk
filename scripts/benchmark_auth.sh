@@ -25,6 +25,12 @@ require_latency_instrumentation() {
     exit 1
   fi
 
+  if ! grep -aq 'REG_LATENCY:' "${amf_bin}"; then
+    echo "[bench] ERROR: ${amf_bin} does not contain REG_LATENCY instrumentation" >&2
+    echo "[bench] Rebuild and install Open5GS, then restart the core." >&2
+    exit 1
+  fi
+
   if [[ "${METHOD}" == "EDHOC_PSK" ]] && ! grep -aq 'EDHOC_TIMING:' "${ausf_bin}"; then
     echo "[bench] ERROR: ${ausf_bin} does not contain EDHOC_TIMING instrumentation" >&2
     echo "[bench] Rebuild and install Open5GS, then restart the core." >&2
@@ -167,9 +173,14 @@ run_single() {
   local ausf_log="${LOG_DIR}/open5gs-ausfd.log"
 
   local auth_latency="TIMEOUT"
+  local reg_latency="TIMEOUT"
   if [[ "${reg_ok}" -eq 1 ]] && [[ -f "${amf_log}" ]]; then
     auth_latency=$(tail -n +"$((amf_before + 1))" "${amf_log}" \
       | grep -o 'AUTH_LATENCY: [^ ]* [0-9]* us' \
+      | tail -1 \
+      | awk '{print $3}' || echo "PARSE_ERROR")
+    reg_latency=$(tail -n +"$((amf_before + 1))" "${amf_log}" \
+      | grep -o 'REG_LATENCY: [^ ]* [0-9]* us' \
       | tail -1 \
       | awk '{print $3}' || echo "PARSE_ERROR")
   fi
@@ -186,7 +197,7 @@ run_single() {
       | awk '{print $2}' || echo "N/A")
   fi
 
-  echo "${run_id},${METHOD},${auth_latency},${leg1_us},${leg2_us}"
+  echo "${run_id},${METHOD},${auth_latency},${reg_latency},${leg1_us},${leg2_us}"
 
   # Clean up per-run UE log
   rm -f "${ue_log}"
@@ -211,7 +222,7 @@ main() {
   set_auth_method "${METHOD}"
 
   # Write CSV header
-  echo "run,method,auth_latency_us,ausf_leg1_us,ausf_leg2_us" > "${results_file}"
+  echo "run,method,auth_latency_us,reg_latency_us,ausf_leg1_us,ausf_leg2_us" > "${results_file}"
 
   # Check prerequisites
   require_latency_instrumentation
@@ -261,21 +272,24 @@ main() {
 
   # Print summary statistics
   if command -v awk >/dev/null; then
-    echo "[bench] Summary (auth_latency_us):"
-    awk -F',' 'NR>1 && $3 != "TIMEOUT" && $3 != "PARSE_ERROR" {
-      n++; sum+=$3; vals[n]=$3
-      if(n==1 || $3<min) min=$3
-      if(n==1 || $3>max) max=$3
+    summarize() {
+      local label="$1" col="$2"
+      echo "[bench] Summary (${label}):"
+      awk -F',' -v col="${col}" 'NR>1 && $col != "TIMEOUT" && $col != "PARSE_ERROR" {
+        n++; sum+=$col; vals[n]=$col
+        if(n==1 || $col<min) min=$col
+        if(n==1 || $col>max) max=$col
+      }
+      END {
+        if(n==0) { print "  No successful runs"; exit }
+        mean=sum/n
+        for(i=1;i<=n;i++) for(j=i+1;j<=n;j++) if(vals[i]>vals[j]) {t=vals[i];vals[i]=vals[j];vals[j]=t}
+        if(n%2==1) median=vals[int(n/2)+1]; else median=(vals[n/2]+vals[n/2+1])/2
+        printf "  n=%d  mean=%.0f  median=%.0f  min=%d  max=%d\n", n, mean, median, min, max
+      }' "${results_file}"
     }
-    END {
-      if(n==0) { print "  No successful runs"; exit }
-      mean=sum/n
-      for(i=1;i<=n;i++) sumsq+=($3-mean)^2
-      # Sort for median
-      for(i=1;i<=n;i++) for(j=i+1;j<=n;j++) if(vals[i]>vals[j]) {t=vals[i];vals[i]=vals[j];vals[j]=t}
-      if(n%2==1) median=vals[int(n/2)+1]; else median=(vals[n/2]+vals[n/2+1])/2
-      printf "  n=%d  mean=%.0f  median=%.0f  min=%d  max=%d\n", n, mean, median, min, max
-    }' "${results_file}"
+    summarize "auth_latency_us" 3
+    summarize "reg_latency_us" 4
   fi
 }
 

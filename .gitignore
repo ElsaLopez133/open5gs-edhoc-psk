@@ -9,5 +9,6 @@ subprojects/usrsctp
 run_logs/
 run_pids/
 open5gs/
+plots/*.png
 
 webui/.next

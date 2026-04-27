@@ -54,6 +54,9 @@ ogs_nas_5gmm_cause_t gmm_handle_registration_request(amf_ue_t *amf_ue,
     ran_ue = ran_ue_find_by_id(amf_ue->ran_ue_id);
     ogs_assert(ran_ue);
 
+    if (!amf_ue->reg_start_time)
+        amf_ue->reg_start_time = ogs_time_now();
+
     ogs_assert(registration_request);
     registration_type = &registration_request->registration_type;
     ogs_assert(registration_type);
