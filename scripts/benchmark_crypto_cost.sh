@@ -16,7 +16,7 @@ COOLDOWN=2
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") <edhoc|aka> [options]
+Usage: $(basename "$0") <edhoc|aka> [file_tag] [options]
 
 Runs N UE registrations and collects crypto timing logs from AUSF/UDM.
 
@@ -54,6 +54,19 @@ parse_args() {
       ;;
   esac
   shift
+
+  FILE_TAG=""
+  if [[ $# -gt 0 && "$1" != -* ]]; then
+    FILE_TAG="$1"
+    shift
+  fi
+
+  if [[ -z "$FILE_TAG" ]]; then
+    case "$METHOD" in
+      EDHOC_PSK) FILE_TAG="edhoc_psk" ;;
+      5G_AKA) FILE_TAG="5g_aka" ;;
+    esac
+  fi
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -335,8 +348,8 @@ main() {
   mkdir -p "${BENCH_DIR}"
   local timestamp method_tag results_file failed line total
   timestamp=$(date +%Y%m%d-%H%M%S)
-  method_tag=$(echo "${METHOD}" | tr '[:upper:]' '[:lower:]')
-  results_file="${BENCH_DIR}/crypto_${method_tag}_${timestamp}.csv"
+#  method_tag=$(echo "${METHOD}" | tr '[:upper:]' '[:lower:]')
+  results_file="${BENCH_DIR}/crypto_${FILE_TAG}_${timestamp}.csv"
 
   echo "[bench] Method: ${METHOD}"
   echo "[bench] Runs: ${RUNS}"

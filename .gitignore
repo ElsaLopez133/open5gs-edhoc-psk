@@ -12,3 +12,6 @@ open5gs/
 plots/*.png
 
 webui/.next
+
+*.csv
+*.pcap
