@@ -83,8 +83,6 @@ static bool edhoc_set_vector_from_subscription(
     }
 
     vector->av_type = OpenAPI_av_type_EDHOC_PSK;
-    vector->rand = (char *)"00";
-    vector->autn = (char *)"00";
     vector->edhoc_kid = subscription->edhoc_kid;
     vector->edhoc_cred_i_ccs_psk_hex =
         subscription->edhoc_cred_i_ccs_psk_hex;

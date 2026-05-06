@@ -101,13 +101,16 @@ cJSON *OpenAPI_authentication_vector_convertToJSON(OpenAPI_authentication_vector
         goto end;
     }
 
-    if (!authentication_vector->rand) {
+    if (authentication_vector->av_type != OpenAPI_av_type_EDHOC_PSK &&
+        !authentication_vector->rand) {
         ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [rand]");
         return NULL;
     }
-    if (cJSON_AddStringToObject(item, "rand", authentication_vector->rand) == NULL) {
-        ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [rand]");
-        goto end;
+    if (authentication_vector->rand) {
+        if (cJSON_AddStringToObject(item, "rand", authentication_vector->rand) == NULL) {
+            ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [rand]");
+            goto end;
+        }
     }
 
     if (authentication_vector->xres) {
@@ -117,13 +120,16 @@ cJSON *OpenAPI_authentication_vector_convertToJSON(OpenAPI_authentication_vector
     }
     }
 
-    if (!authentication_vector->autn) {
+    if (authentication_vector->av_type != OpenAPI_av_type_EDHOC_PSK &&
+        !authentication_vector->autn) {
         ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [autn]");
         return NULL;
     }
-    if (cJSON_AddStringToObject(item, "autn", authentication_vector->autn) == NULL) {
-        ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [autn]");
-        goto end;
+    if (authentication_vector->autn) {
+        if (cJSON_AddStringToObject(item, "autn", authentication_vector->autn) == NULL) {
+            ogs_error("OpenAPI_authentication_vector_convertToJSON() failed [autn]");
+            goto end;
+        }
     }
 
     if (authentication_vector->ck_prime) {
@@ -197,13 +203,15 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_parseFromJSON(cJS
     av_typeVariable = OpenAPI_av_type_FromString(av_type->valuestring);
 
     rand = cJSON_GetObjectItemCaseSensitive(authentication_vectorJSON, "rand");
-    if (!rand) {
+    if (av_typeVariable != OpenAPI_av_type_EDHOC_PSK && !rand) {
         ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [rand]");
         goto end;
     }
-    if (!cJSON_IsString(rand)) {
-        ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [rand]");
-        goto end;
+    if (rand) {
+        if (!cJSON_IsString(rand)) {
+            ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [rand]");
+            goto end;
+        }
     }
 
     xres = cJSON_GetObjectItemCaseSensitive(authentication_vectorJSON, "xres");
@@ -215,13 +223,15 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_parseFromJSON(cJS
     }
 
     autn = cJSON_GetObjectItemCaseSensitive(authentication_vectorJSON, "autn");
-    if (!autn) {
+    if (av_typeVariable != OpenAPI_av_type_EDHOC_PSK && !autn) {
         ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [autn]");
         goto end;
     }
-    if (!cJSON_IsString(autn)) {
-        ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [autn]");
-        goto end;
+    if (autn) {
+        if (!cJSON_IsString(autn)) {
+            ogs_error("OpenAPI_authentication_vector_parseFromJSON() failed [autn]");
+            goto end;
+        }
     }
 
     ck_prime = cJSON_GetObjectItemCaseSensitive(authentication_vectorJSON, "ckPrime");
@@ -272,9 +282,9 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_parseFromJSON(cJS
 
     authentication_vector_local_var = OpenAPI_authentication_vector_create (
         av_typeVariable,
-        ogs_strdup(rand->valuestring),
+        rand && !cJSON_IsNull(rand) ? ogs_strdup(rand->valuestring) : NULL,
         xres && !cJSON_IsNull(xres) ? ogs_strdup(xres->valuestring) : NULL,
-        ogs_strdup(autn->valuestring),
+        autn && !cJSON_IsNull(autn) ? ogs_strdup(autn->valuestring) : NULL,
         ck_prime && !cJSON_IsNull(ck_prime) ? ogs_strdup(ck_prime->valuestring) : NULL,
         ik_prime && !cJSON_IsNull(ik_prime) ? ogs_strdup(ik_prime->valuestring) : NULL,
         xres_star && !cJSON_IsNull(xres_star) ? ogs_strdup(xres_star->valuestring) : NULL,

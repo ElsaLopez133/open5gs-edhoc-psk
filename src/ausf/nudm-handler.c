@@ -300,15 +300,8 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         ogs_hex_to_ascii(ausf_ue->hxres_star, sizeof(ausf_ue->hxres_star),
                 hxres_star_string, sizeof(hxres_star_string));
         AV5G_AKA.hxres_star = hxres_star_string;
-    } else {
-        /* EDHOC does not use 5G-AKA challenge material, but the existing
-         * UeAuthenticationCtx schema still requires this object to be present. */
-        AV5G_AKA.rand = (char *)"00";
-        AV5G_AKA.autn = (char *)"00";
-        AV5G_AKA.hxres_star = (char *)"00";
+        UeAuthenticationCtx._5g_auth_data = &AV5G_AKA;
     }
-    // So even for EDHOC, the outgoing UeAuthenticationCtx still carries _5g_auth_data.
-    UeAuthenticationCtx._5g_auth_data = &AV5G_AKA;
 
     memset(&LinksValueSchemeValue, 0, sizeof(LinksValueSchemeValue));
 
