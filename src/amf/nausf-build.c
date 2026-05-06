@@ -134,17 +134,15 @@ ogs_sbi_request_t *amf_nausf_auth_build_authenticate_confirmation(
     }
 
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        size_t hex_len;
+        int encoded_len;
         ogs_assert(edhoc_payload);
-        hex_len = (size_t)edhoc_payload->length * 2 + 1;
-        ConfirmationData->edhoc_payload = ogs_malloc(hex_len);
+        ogs_assert(edhoc_payload->length == 0 || edhoc_payload->buffer);
+        encoded_len = ogs_base64_encode_len(edhoc_payload->length);
+        ConfirmationData->edhoc_payload = ogs_malloc(encoded_len);
         ogs_assert(ConfirmationData->edhoc_payload);
-        if (edhoc_payload->length > 0 && edhoc_payload->buffer)
-            ogs_hex_to_ascii(
-                    edhoc_payload->buffer, edhoc_payload->length,
-                    ConfirmationData->edhoc_payload, hex_len);
-        else
-            ConfirmationData->edhoc_payload[0] = '\0';
+        ogs_base64_encode_binary(
+                ConfirmationData->edhoc_payload,
+                edhoc_payload->buffer, edhoc_payload->length);
     } else {
         ogs_hex_to_ascii(amf_ue->xres_star, sizeof(amf_ue->xres_star),
                 xres_star_string, sizeof(xres_star_string));

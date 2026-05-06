@@ -9,6 +9,7 @@ subprojects/usrsctp
 run_logs/
 run_pids/
 open5gs/
+benchmarks/
 
 docs/edhoc-nas-ie-and-sbi-cleanup.md
 docs/edhoc-psk-integration-design.md

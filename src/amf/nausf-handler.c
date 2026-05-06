@@ -244,11 +244,6 @@ int amf_nausf_auth_handle_authenticate_confirmation(
         return OGS_ERROR;
     }
 
-    if (!ConfirmationDataResponse->supi) {
-        ogs_error("[%s] No supi", amf_ue->suci);
-        return OGS_ERROR;
-    }
-
     amf_ue->auth_result = ConfirmationDataResponse->auth_result;
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
         amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_ONGOING) {
@@ -261,25 +256,24 @@ int amf_nausf_auth_handle_authenticate_confirmation(
             return OGS_ERROR;
         }
 
-        payload_len = strlen(ConfirmationDataResponse->edhoc_payload);
-        if ((payload_len % 2) != 0) {
-            ogs_error("[%s] Invalid tunneled EDHOC payload length [%d]",
-                    amf_ue->suci, payload_len);
-            return OGS_ERROR;
-        }
-
-        payload_len /= 2;
-        if (payload_len > (int)sizeof(amf_ue->edhoc_n1_relay.payload)) {
+        payload_len = ogs_base64_decode_len(
+                ConfirmationDataResponse->edhoc_payload);
+        if (payload_len >
+                (int)sizeof(amf_ue->edhoc_n1_relay.payload) + 1) {
             ogs_error("[%s] Tunneled EDHOC payload too large [%d]",
                     amf_ue->suci, payload_len);
             return OGS_ERROR;
         }
 
-        if (payload_len > 0)
-            ogs_ascii_to_hex(ConfirmationDataResponse->edhoc_payload,
-                    strlen(ConfirmationDataResponse->edhoc_payload),
-                    amf_ue->edhoc_n1_relay.payload,
-                    sizeof(amf_ue->edhoc_n1_relay.payload));
+        payload_len = ogs_base64_decode_binary(
+                amf_ue->edhoc_n1_relay.payload,
+                ConfirmationDataResponse->edhoc_payload);
+        if (payload_len < 0 ||
+            payload_len > (int)sizeof(amf_ue->edhoc_n1_relay.payload)) {
+            ogs_error("[%s] Invalid tunneled EDHOC payload",
+                    amf_ue->suci);
+            return OGS_ERROR;
+        }
         amf_ue->edhoc_n1_relay.payload_len = payload_len;
 
         ogs_info("EDHOC: relaying EDHOC payload to UE[%s] [%d bytes]",
@@ -293,6 +287,11 @@ int amf_nausf_auth_handle_authenticate_confirmation(
     }
 
     if (amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_SUCCESS) {
+        if (!ConfirmationDataResponse->supi) {
+            ogs_error("[%s] No supi", amf_ue->suci);
+            return OGS_ERROR;
+        }
+
         if (!ConfirmationDataResponse->kseaf) {
             ogs_error("[%s] No Kseaf", amf_ue->suci);
             return OGS_ERROR;

@@ -151,53 +151,47 @@ static int8_t edhoc_resolve_cred_i(
     return credential_new_symmetric(cred_out, ctx->cred, ctx->cred_len);
 }
 
-/* Decode hex EDHOC payload received over SBI into raw EDHOC CBOR bytes. */
-static bool edhoc_decode_hex_payload(
-        const char *hex_payload, EdhocMessageBuffer *message)
+/* Decode base64 EDHOC payload received over SBI into raw EDHOC CBOR bytes. */
+static bool edhoc_decode_base64_payload(
+        const char *encoded_payload, EdhocMessageBuffer *message)
 {
-    int hex_len;
-    int raw_len;
+    int decoded_max;
+    int decoded_len;
 
-    ogs_assert(hex_payload);
+    ogs_assert(encoded_payload);
     ogs_assert(message);
 
     memset(message, 0, sizeof(*message));
 
-    hex_len = strlen(hex_payload);
-    if ((hex_len % 2) != 0)
+    decoded_max = ogs_base64_decode_len(encoded_payload);
+    if (decoded_max > (int)sizeof(message->content) + 1)
         return false;
 
-    raw_len = hex_len / 2;
-    if (raw_len > (int)sizeof(message->content))
+    decoded_len = ogs_base64_decode_binary(
+            message->content, encoded_payload);
+    if (decoded_len < 0 || decoded_len > (int)sizeof(message->content))
         return false;
 
-    if (raw_len > 0)
-        ogs_ascii_to_hex((char *)hex_payload, hex_len,
-                message->content, sizeof(message->content));
-
-    message->len = raw_len;
+    message->len = decoded_len;
     return true;
 }
 
-/* Encode raw EDHOC CBOR bytes into a hex string for SBI transport. */
-static char *edhoc_encode_hex_payload(const EdhocMessageBuffer *message)
+/* Encode raw EDHOC CBOR bytes into a base64 string for SBI transport. */
+static char *edhoc_encode_base64_payload(const EdhocMessageBuffer *message)
 {
-    char *hex_payload;
-    size_t hex_len;
+    char *encoded_payload;
+    int encoded_len;
 
     ogs_assert(message);
 
-    hex_len = (size_t)message->len * 2 + 1;
-    hex_payload = ogs_malloc(hex_len);
-    ogs_assert(hex_payload);
+    encoded_len = ogs_base64_encode_len(message->len);
+    encoded_payload = ogs_malloc(encoded_len);
+    ogs_assert(encoded_payload);
 
-    if (message->len > 0)
-        ogs_hex_to_ascii(message->content, message->len,
-                hex_payload, hex_len);
-    else
-        hex_payload[0] = '\0';
+    ogs_base64_encode_binary(encoded_payload,
+            message->content, message->len);
 
-    return hex_payload;
+    return encoded_payload;
 }
 
 static int edhoc_derive_kausf_from_exporter(ausf_ue_t *ausf_ue)
@@ -331,13 +325,13 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         edhoc_cred_resolver_ctx_t resolver_ctx;
         uint8_t c_i = 0;
         uint8_t c_r = 0;
-        char *message_2_hex = NULL;
-        char *message_4_hex = NULL;
+        char *message_2_encoded = NULL;
+        char *message_4_encoded = NULL;
         int8_t edhoc_rc;
-        const char *edhoc_hex_payload;
+        const char *edhoc_encoded_payload;
 
-        edhoc_hex_payload = ConfirmationData->edhoc_payload;
-        if (!edhoc_hex_payload) {
+        edhoc_encoded_payload = ConfirmationData->edhoc_payload;
+        if (!edhoc_encoded_payload) {
             ogs_error("[%s] No ConfirmationData.edhocPayload", ausf_ue->suci);
             ogs_assert(true ==
                 ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
@@ -345,9 +339,9 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
             return false;
         }
 
-        if (!edhoc_decode_hex_payload(edhoc_hex_payload, &message_from_ue)) {
+        if (!edhoc_decode_base64_payload(edhoc_encoded_payload, &message_from_ue)) {
             ausf_ue->auth_result = OpenAPI_auth_result_AUTHENTICATION_FAILURE;
-            ogs_error("EDHOC: invalid hex payload from AMF for UE[%s]",
+            ogs_error("EDHOC: invalid base64 payload from AMF for UE[%s]",
                     ausf_ue->suci);
         } else {
             if (!ausf_ue->edhoc_in_progress) {
@@ -410,7 +404,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
 #endif
                 }
                 if (edhoc_rc == 0)
-                    message_2_hex = edhoc_encode_hex_payload(&message_2);
+                    message_2_encoded = edhoc_encode_base64_payload(&message_2);
                 ogs_info("EDHOC_TIMING: leg1_m1_m2 %lld us UE[%s]",
                     (long long)(ogs_time_now() - leg1_start),
                     ausf_ue->suci);
@@ -429,8 +423,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                     memset(&ConfirmationDataResponse, 0, sizeof(ConfirmationDataResponse));
                     ConfirmationDataResponse.auth_result =
                         OpenAPI_auth_result_AUTHENTICATION_ONGOING;
-                    ConfirmationDataResponse.edhoc_payload = message_2_hex;
-                    ConfirmationDataResponse.supi = ausf_ue->supi;
+                    ConfirmationDataResponse.edhoc_payload = message_2_encoded;
 
                     memset(&sendmsg, 0, sizeof(sendmsg));
                     sendmsg.ConfirmationDataResponse = &ConfirmationDataResponse;
@@ -444,7 +437,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                             (size_t)message_2.len,
                             ausf_ue->edhoc_c_i, ausf_ue->edhoc_c_r);
 
-                    ogs_free(message_2_hex);
+                    ogs_free(message_2_encoded);
                     return true;
                 }
             } else if (!ausf_ue->edhoc_waiting_message4_ack) {
@@ -552,7 +545,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
 #endif
                         }
                         if (edhoc_rc == 0)
-                            message_4_hex = edhoc_encode_hex_payload(&message_4);
+                            message_4_encoded = edhoc_encode_base64_payload(&message_4);
                         if (edhoc_rc == 0)
                             edhoc_rc = edhoc_derive_kausf_from_exporter(
                                     ausf_ue) == OGS_OK ? 0 : -1;
@@ -562,8 +555,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                                     sizeof(ConfirmationDataResponse));
                             ConfirmationDataResponse.auth_result =
                                 OpenAPI_auth_result_AUTHENTICATION_ONGOING;
-                            ConfirmationDataResponse.edhoc_payload = message_4_hex;
-                            ConfirmationDataResponse.supi = ausf_ue->supi;
+                            ConfirmationDataResponse.edhoc_payload = message_4_encoded;
 
                             memset(&sendmsg, 0, sizeof(sendmsg));
                             sendmsg.ConfirmationDataResponse =
@@ -582,7 +574,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                             ogs_info("EDHOC: generated message_4 for UE[%s] [m3_len=%zu,m4_len=%zu]",
                                     ausf_ue->suci, (size_t)message_from_ue.len,
                                     (size_t)message_4.len);
-                            ogs_free(message_4_hex);
+                            ogs_free(message_4_encoded);
                             return true;
                         }
 
