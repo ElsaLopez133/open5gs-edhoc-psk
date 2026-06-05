@@ -248,8 +248,9 @@ int amf_nausf_auth_handle_authenticate_confirmation(
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
         amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_ONGOING) {
         int r;
-        /* Ongoing EDHOC leg: AMF receives tunneled EDHOC payload (message_2/message_4)
-         * from AUSF (N12), stores raw bytes, then triggers NAS Authentication Request (N1). */
+        /* Mid-handshake EDHOC leg (currently message_2 only): AUSF returns
+         * AUTHENTICATION_ONGOING with the EDHOC payload to relay. AMF stores
+         * the raw bytes and triggers a NAS Authentication Request (N1). */
 
         if (!ConfirmationDataResponse->edhoc_payload) {
             ogs_error("[%s] No tunneled EDHOC payload", amf_ue->suci);
@@ -287,6 +288,42 @@ int amf_nausf_auth_handle_authenticate_confirmation(
     }
 
     if (amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_SUCCESS) {
+        /* For EDHOC-PSK, AUSF attaches message_4 to the SUCCESS response.
+         * Deliver it to the UE in a final NAS Authentication Request that
+         * does not expect a NAS Authentication Response. The UE processes
+         * message_4 silently, and the subsequent NAS Security Mode Command
+         * provides implicit key confirmation. */
+        if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
+            ConfirmationDataResponse->edhoc_payload) {
+            int r;
+
+            payload_len = ogs_base64_decode_len(
+                    ConfirmationDataResponse->edhoc_payload);
+            if (payload_len >
+                    (int)sizeof(amf_ue->edhoc_n1_relay.payload) + 1) {
+                ogs_error("[%s] message_4 payload too large [%d]",
+                        amf_ue->suci, payload_len);
+                return OGS_ERROR;
+            }
+
+            payload_len = ogs_base64_decode_binary(
+                    amf_ue->edhoc_n1_relay.payload,
+                    ConfirmationDataResponse->edhoc_payload);
+            if (payload_len < 0 ||
+                payload_len > (int)sizeof(amf_ue->edhoc_n1_relay.payload)) {
+                ogs_error("[%s] Invalid message_4 payload", amf_ue->suci);
+                return OGS_ERROR;
+            }
+            amf_ue->edhoc_n1_relay.payload_len = payload_len;
+
+            ogs_info("EDHOC: relaying message_4 to UE[%s] [%d bytes] (no UE response expected)",
+                    amf_ue->suci ? amf_ue->suci : "(unknown)", payload_len);
+
+            r = nas_5gs_send_authentication_request(amf_ue);
+            ogs_expect(r == OGS_OK);
+            ogs_assert(r != OGS_ERROR);
+        }
+
         if (!ConfirmationDataResponse->supi) {
             ogs_error("[%s] No supi", amf_ue->suci);
             return OGS_ERROR;

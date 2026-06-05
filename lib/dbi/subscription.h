@@ -41,7 +41,7 @@ typedef struct ogs_dbi_auth_info_s {
     uint64_t      sqn;
     char          authentication_method[32];
     char          edhoc_kid_hex[OGS_DBI_EDHOC_KID_HEX_LEN + 1];
-    char          edhoc_cred_i_ccs_psk_hex[OGS_DBI_EDHOC_CRED_HEX_LEN + 1];
+    char          edhoc_cred_i[OGS_DBI_EDHOC_CRED_HEX_LEN + 1];
 } ogs_dbi_auth_info_t;
 
 int ogs_dbi_auth_info(char *supi, ogs_dbi_auth_info_t *auth_info);

@@ -248,13 +248,13 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         ausf_ue->edhoc_cred_i.kid_len = 0;
         ausf_ue->edhoc_cred_i.cred_i_len = 0;
         if (AuthenticationVector && AuthenticationVector->edhoc_kid &&
-            AuthenticationVector->edhoc_cred_i_ccs_psk_hex) {
+            AuthenticationVector->edhoc_cred_i) {
             if (!edhoc_store_hex_blob(AuthenticationVector->edhoc_kid,
                         ausf_ue->edhoc_cred_i.kid,
                         sizeof(ausf_ue->edhoc_cred_i.kid),
                         &ausf_ue->edhoc_cred_i.kid_len) ||
                 !edhoc_store_hex_blob(
-                        AuthenticationVector->edhoc_cred_i_ccs_psk_hex,
+                        AuthenticationVector->edhoc_cred_i,
                         ausf_ue->edhoc_cred_i.cred_i,
                         sizeof(ausf_ue->edhoc_cred_i.cred_i),
                         &ausf_ue->edhoc_cred_i.cred_i_len)) {
@@ -460,6 +460,13 @@ bool ausf_nudm_ueau_handle_result_confirmation_inform(ausf_ue_t *ausf_ue,
         ConfirmationDataResponse.kseaf = kseaf_string;
     }
 
+    /* For EDHOC-PSK, attach message_4 (staged on the message_3 leg) so that
+     * the AMF can deliver it to the UE in the NAS Authentication Result. */
+    if (ausf_ue->edhoc_message_4_pending) {
+        ConfirmationDataResponse.edhoc_payload =
+            ausf_ue->edhoc_message_4_pending;
+    }
+
     memset(&sendmsg, 0, sizeof(sendmsg));
 
     sendmsg.ConfirmationDataResponse = &ConfirmationDataResponse;
@@ -467,6 +474,11 @@ bool ausf_nudm_ueau_handle_result_confirmation_inform(ausf_ue_t *ausf_ue,
     response = ogs_sbi_build_response(&sendmsg, OGS_SBI_HTTP_STATUS_OK);
     ogs_assert(response);
     ogs_assert(true == ogs_sbi_server_send_response(stream, response));
+
+    if (ausf_ue->edhoc_message_4_pending) {
+        ogs_free(ausf_ue->edhoc_message_4_pending);
+        ausf_ue->edhoc_message_4_pending = NULL;
+    }
 
     return true;
 }

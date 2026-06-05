@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 002
 
 # Measures crypto cost on both the network side (AUSF/UDM) and the UE side
 # (UERANSIM nr-ue) from the SAME registration. Each row of the CSV holds the
@@ -23,6 +24,7 @@ RUNS=30
 METHOD=""
 WAIT_TIMEOUT=15
 COOLDOWN=2
+OUTPUT_TAG=""
 
 # CPU pinning. Override via env vars or -p / -P flags.
 # Default to non-sibling P-cores on a hybrid Intel layout.
@@ -40,10 +42,20 @@ Options:
   -n <runs>       Number of registration runs (default: ${RUNS})
   -t <seconds>    Timeout waiting for registration (default: ${WAIT_TIMEOUT})
   -c <seconds>    Cooldown between runs (default: ${COOLDOWN})
+  -o <name>       Add name to output file before timestamp
   -p <core>       CPU core to pin nr-ue to via taskset (default: ${UE_CORE})
   -P              Disable CPU pinning of nr-ue
   -h, --help      Show this help
 EOF
+}
+
+set_output_tag() {
+  local tag="$1"
+  if [[ ! "${tag}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid output name: ${tag} (use only letters, digits, '.', '_' or '-')" >&2
+    exit 1
+  fi
+  OUTPUT_TAG="${tag}"
 }
 
 parse_args() {
@@ -60,6 +72,7 @@ parse_args() {
       -n) RUNS="${2:?missing count}"; shift 2 ;;
       -t) WAIT_TIMEOUT="${2:?missing timeout}"; shift 2 ;;
       -c) COOLDOWN="${2:?missing cooldown}"; shift 2 ;;
+      -o) set_output_tag "${2:?missing output name}"; shift 2 ;;
       -p) UE_CORE="${2:?missing core}"; PIN_UE=1; shift 2 ;;
       -P) PIN_UE=0; shift 1 ;;
       -h|--help) usage; exit 0 ;;
@@ -451,10 +464,14 @@ main() {
   parse_args "$@"
 
   mkdir -p "${BENCH_DIR}" "${LOG_DIR}"
-  local timestamp method_tag results_file failed line total
+  local timestamp method_tag output_tag_part results_file failed line total
   timestamp=$(date +%Y%m%d-%H%M%S)
   method_tag=$(echo "${METHOD}" | tr '[:upper:]' '[:lower:]')
-  results_file="${BENCH_DIR}/crypto_both_${method_tag}_${timestamp}.csv"
+  output_tag_part=""
+  if [[ -n "${OUTPUT_TAG}" ]]; then
+    output_tag_part="_${OUTPUT_TAG}"
+  fi
+  results_file="${BENCH_DIR}/crypto_both_${method_tag}${output_tag_part}_${timestamp}.csv"
 
   echo "[bench-both] Method: ${METHOD}"
   echo "[bench-both] Runs: ${RUNS}"

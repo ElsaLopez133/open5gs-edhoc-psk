@@ -73,19 +73,19 @@ static bool edhoc_set_vector_from_subscription(
     ogs_assert(vector);
 
     if (!subscription || !subscription->edhoc_kid ||
-        !subscription->edhoc_cred_i_ccs_psk_hex) {
+        !subscription->edhoc_cred_i) {
         return false;
     }
 
     if (strlen(subscription->edhoc_kid) == 0 ||
-        strlen(subscription->edhoc_cred_i_ccs_psk_hex) == 0) {
+        strlen(subscription->edhoc_cred_i) == 0) {
         return false;
     }
 
     vector->av_type = OpenAPI_av_type_EDHOC_PSK;
     vector->edhoc_kid = subscription->edhoc_kid;
-    vector->edhoc_cred_i_ccs_psk_hex =
-        subscription->edhoc_cred_i_ccs_psk_hex;
+    vector->edhoc_cred_i =
+        subscription->edhoc_cred_i;
 
     return true;
 }

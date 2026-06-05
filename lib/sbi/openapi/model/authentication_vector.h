@@ -32,7 +32,7 @@ typedef struct OpenAPI_authentication_vector_s {
     char *kausf;
     /* Open5GS EDHOC-PSK extension fields */
     char *edhoc_kid;
-    char *edhoc_cred_i_ccs_psk_hex;
+    char *edhoc_cred_i;
 } OpenAPI_authentication_vector_t;
 
 OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_create(
@@ -45,7 +45,7 @@ OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_create(
     char *xres_star,
     char *kausf,
     char *edhoc_kid,
-    char *edhoc_cred_i_ccs_psk_hex
+    char *edhoc_cred_i
 );
 void OpenAPI_authentication_vector_free(OpenAPI_authentication_vector_t *authentication_vector);
 OpenAPI_authentication_vector_t *OpenAPI_authentication_vector_parseFromJSON(cJSON *authentication_vectorJSON);

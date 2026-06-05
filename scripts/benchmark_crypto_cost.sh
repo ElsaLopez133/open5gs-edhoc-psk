@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 002
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPEN5GS_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -13,6 +14,7 @@ RUNS=30
 METHOD=""
 WAIT_TIMEOUT=15
 COOLDOWN=2
+OUTPUT_TAG=""
 
 usage() {
   cat <<EOF
@@ -24,6 +26,7 @@ Options:
   -n <runs>       Number of registration runs (default: ${RUNS})
   -t <seconds>    Timeout waiting for registration (default: ${WAIT_TIMEOUT})
   -c <seconds>    Cooldown between runs (default: ${COOLDOWN})
+  -o <name>       Add name to output file before timestamp
   -h, --help      Show this help
 
 Prerequisites:
@@ -35,7 +38,17 @@ Prerequisites:
 Examples:
   $(basename "$0") edhoc -n 30
   $(basename "$0") aka -n 30
+  $(basename "$0") edhoc -n 30 -o test1
 EOF
+}
+
+set_output_tag() {
+  local tag="$1"
+  if [[ ! "${tag}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid output name: ${tag} (use only letters, digits, '.', '_' or '-')" >&2
+    exit 1
+  fi
+  OUTPUT_TAG="${tag}"
 }
 
 parse_args() {
@@ -60,6 +73,7 @@ parse_args() {
       -n) RUNS="${2:?missing count}"; shift 2 ;;
       -t) WAIT_TIMEOUT="${2:?missing timeout}"; shift 2 ;;
       -c) COOLDOWN="${2:?missing cooldown}"; shift 2 ;;
+      -o) set_output_tag "${2:?missing output name}"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -333,10 +347,14 @@ main() {
   parse_args "$@"
 
   mkdir -p "${BENCH_DIR}"
-  local timestamp method_tag results_file failed line total
+  local timestamp method_tag output_tag_part results_file failed line total
   timestamp=$(date +%Y%m%d-%H%M%S)
   method_tag=$(echo "${METHOD}" | tr '[:upper:]' '[:lower:]')
-  results_file="${BENCH_DIR}/crypto_${method_tag}_${timestamp}.csv"
+  output_tag_part=""
+  if [[ -n "${OUTPUT_TAG}" ]]; then
+    output_tag_part="_${OUTPUT_TAG}"
+  fi
+  results_file="${BENCH_DIR}/crypto_${method_tag}${output_tag_part}_${timestamp}.csv"
 
   echo "[bench] Method: ${METHOD}"
   echo "[bench] Runs: ${RUNS}"

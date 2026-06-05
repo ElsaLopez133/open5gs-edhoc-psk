@@ -80,20 +80,20 @@ static void ogs_log_edhoc_crypto(
 }
 
 static bool edhoc_extract_kid_from_id_cred(
-        const IdCred *id_cred_i, const uint8_t **kid, size_t *kid_len)
+        const IdCred *id_cred_psk, const uint8_t **kid, size_t *kid_len)
 {
     const uint8_t *b = NULL;
     size_t len = 0;
 
-    ogs_assert(id_cred_i);
+    ogs_assert(id_cred_psk);
     ogs_assert(kid);
     ogs_assert(kid_len);
 
     *kid = NULL;
     *kid_len = 0;
 
-    b = id_cred_i->bytes.content;
-    len = id_cred_i->bytes.len;
+    b = id_cred_psk->bytes.content;
+    len = id_cred_psk->bytes.len;
     if (!b || len < 3)
         return false;
 
@@ -122,13 +122,13 @@ static bool edhoc_extract_kid_from_id_cred(
 }
 
 static int8_t edhoc_resolve_cred_i(
-        const IdCred *id_cred_i, CredentialC *cred_out, void *context)
+        const IdCred *id_cred_psk, CredentialC *cred_out, void *context)
 {
     edhoc_cred_resolver_ctx_t *ctx = context;
     const uint8_t *kid = NULL;
     size_t kid_len = 0;
 
-    ogs_assert(id_cred_i);
+    ogs_assert(id_cred_psk);
     ogs_assert(cred_out);
     ogs_assert(ctx);
     ogs_assert(ctx->kid);
@@ -136,13 +136,13 @@ static int8_t edhoc_resolve_cred_i(
     ogs_assert(ctx->cred);
     ogs_assert(ctx->cred_len);
 
-    if (!edhoc_extract_kid_from_id_cred(id_cred_i, &kid, &kid_len)) {
-        ogs_error("EDHOC: resolver failed to parse ID_CRED_I");
+    if (!edhoc_extract_kid_from_id_cred(id_cred_psk, &kid, &kid_len)) {
+        ogs_error("EDHOC: resolver failed to parse ID_CRED_PSK");
         return -1;
     }
 
     if (kid_len != ctx->kid_len || memcmp(kid, ctx->kid, kid_len) != 0) {
-        ogs_error("EDHOC: unknown kid in ID_CRED_I [len=%zu]", kid_len);
+        ogs_error("EDHOC: unknown kid in ID_CRED_PSK [len=%zu]", kid_len);
         return -1;
     }
 
@@ -271,10 +271,13 @@ bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
     ausf_ue->serving_network_name = ogs_strdup(serving_network_name);
     ogs_assert(ausf_ue->serving_network_name);
     ausf_ue->edhoc_in_progress = false;
-    ausf_ue->edhoc_waiting_message4_ack = false;
     memset(&ausf_ue->edhoc_responder, 0, sizeof(ausf_ue->edhoc_responder));
     ausf_ue->edhoc_c_i = 0;
     ausf_ue->edhoc_c_r = 0;
+    if (ausf_ue->edhoc_message_4_pending) {
+        ogs_free(ausf_ue->edhoc_message_4_pending);
+        ausf_ue->edhoc_message_4_pending = NULL;
+    }
 
     r = ausf_sbi_discover_and_send(
             OGS_SBI_SERVICE_TYPE_NUDM_UEAU, NULL,
@@ -319,7 +322,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         EadItemsC ead_2;
         EadItemsC ead_3;
         EadItemsC ead_4;
-        IdCred id_cred_i;
+        IdCred id_cred_psk;
         CredentialC cred_i_expected;
         uint8_t prk_out[SHA256_DIGEST_LEN];
         edhoc_cred_resolver_ctx_t resolver_ctx;
@@ -416,7 +419,6 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                             ausf_ue->suci, edhoc_rc);
                 } else {
                     ausf_ue->edhoc_in_progress = true;
-                    ausf_ue->edhoc_waiting_message4_ack = false;
                     ausf_ue->edhoc_c_i = c_i;
                     ausf_ue->edhoc_c_r = c_r;
 
@@ -440,9 +442,11 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                     ogs_free(message_2_encoded);
                     return true;
                 }
-            } else if (!ausf_ue->edhoc_waiting_message4_ack) {
-                /* Second EDHOC leg: parse message_3 and generate message_4.
-                 * message_4 is relayed in AUTHENTICATION_ONGOING. */
+            } else {
+                /* Second (final) EDHOC leg: parse message_3, derive K_AUSF,
+                 * generate message_4, and return AUTHENTICATION_SUCCESS in
+                 * the same response. AMF will deliver message_4 to the UE in
+                 * a NAS Authentication Result (no UE response expected). */
                 ogs_time_t leg2_start = ogs_time_now();
                 uint64_t t0_ns, t1_ns;
 #if OGS_HAVE_CPU_CYCLES
@@ -451,7 +455,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                 memset(&ead_3, 0, sizeof(ead_3));
                 memset(&ead_4, 0, sizeof(ead_4));
                 memset(&message_4, 0, sizeof(message_4));
-                memset(&id_cred_i, 0, sizeof(id_cred_i));
+                memset(&id_cred_psk, 0, sizeof(id_cred_psk));
                 memset(&cred_i_expected, 0, sizeof(cred_i_expected));
                 memset(prk_out, 0, sizeof(prk_out));
                 memset(&resolver_ctx, 0, sizeof(resolver_ctx));
@@ -485,7 +489,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
 #endif
                     edhoc_rc = responder_parse_message_3_with_cred_resolver(
                             &ausf_ue->edhoc_responder,
-                            &message_from_ue, &id_cred_i, &ead_3,
+                            &message_from_ue, &id_cred_psk, &ead_3,
                             edhoc_resolve_cred_i, &resolver_ctx);
                     t1_ns = ogs_crypto_now_ns();
 #if OGS_HAVE_CPU_CYCLES
@@ -551,56 +555,36 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
                                     ausf_ue) == OGS_OK ? 0 : -1;
 
                         if (edhoc_rc == 0) {
-                            memset(&ConfirmationDataResponse, 0,
-                                    sizeof(ConfirmationDataResponse));
-                            ConfirmationDataResponse.auth_result =
-                                OpenAPI_auth_result_AUTHENTICATION_ONGOING;
-                            ConfirmationDataResponse.edhoc_payload = message_4_encoded;
+                            /* Stage message_4 to be attached to the
+                             * AUTHENTICATION_SUCCESS response built later
+                             * in the UDM result-confirmation callback. */
+                            if (ausf_ue->edhoc_message_4_pending)
+                                ogs_free(ausf_ue->edhoc_message_4_pending);
+                            ausf_ue->edhoc_message_4_pending = message_4_encoded;
+                            message_4_encoded = NULL;
 
-                            memset(&sendmsg, 0, sizeof(sendmsg));
-                            sendmsg.ConfirmationDataResponse =
-                                &ConfirmationDataResponse;
-
-                            response = ogs_sbi_build_response(
-                                    &sendmsg, OGS_SBI_HTTP_STATUS_OK);
-                            ogs_assert(response);
-                            ogs_assert(true == ogs_sbi_server_send_response(
-                                        stream, response));
-
-                            ausf_ue->edhoc_waiting_message4_ack = true;
+                            ausf_ue->edhoc_in_progress = false;
+                            ausf_ue->auth_result =
+                                OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
                             ogs_info("EDHOC_TIMING: leg2_m3_m4_kausf %lld us UE[%s]",
                                 (long long)(ogs_time_now() - leg2_start),
                                 ausf_ue->suci);
-                            ogs_info("EDHOC: generated message_4 for UE[%s] [m3_len=%zu,m4_len=%zu]",
+                            ogs_info("EDHOC: staged message_4 for SUCCESS reply UE[%s] [m3_len=%zu,m4_len=%zu]",
                                     ausf_ue->suci, (size_t)message_from_ue.len,
                                     (size_t)message_4.len);
-                            ogs_free(message_4_encoded);
-                            return true;
+                        } else {
+                            ausf_ue->auth_result =
+                                OpenAPI_auth_result_AUTHENTICATION_FAILURE;
+                            ogs_error("EDHOC: failed to generate message_4 for UE[%s] [rc=%d]",
+                                    ausf_ue->suci, edhoc_rc);
+                            ogs_info("EDHOC: parsed message_3 for UE[%s] [len=%zu]",
+                                    ausf_ue->suci, (size_t)message_from_ue.len);
+                            if (message_4_encoded) {
+                                ogs_free(message_4_encoded);
+                                message_4_encoded = NULL;
+                            }
                         }
-
-                        ausf_ue->auth_result =
-                            OpenAPI_auth_result_AUTHENTICATION_FAILURE;
-                        ogs_error("EDHOC: failed to generate message_4 for UE[%s] [rc=%d]",
-                                ausf_ue->suci, edhoc_rc);
-                        ogs_info("EDHOC: parsed message_3 for UE[%s] [len=%zu]",
-                                ausf_ue->suci, (size_t)message_from_ue.len);
                     }
-                }
-            } else {
-                /* Third EDHOC leg: UE acknowledges message_4 relay.
-                 * An empty EAP-Response acknowledges protected success. */
-                if (message_from_ue.len == 0) {
-                    ausf_ue->auth_result =
-                        OpenAPI_auth_result_AUTHENTICATION_SUCCESS;
-                    ausf_ue->edhoc_in_progress = false;
-                    ausf_ue->edhoc_waiting_message4_ack = false;
-                    ogs_info("EDHOC: received empty message_4 ACK for UE[%s]",
-                            ausf_ue->suci);
-                } else {
-                    ausf_ue->auth_result =
-                        OpenAPI_auth_result_AUTHENTICATION_FAILURE;
-                    ogs_error("EDHOC: expected empty message_4 ACK for UE[%s] [len=%zu]",
-                            ausf_ue->suci, (size_t)message_from_ue.len);
                 }
             }
         }
