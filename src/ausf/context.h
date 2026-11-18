@@ -88,10 +88,12 @@ struct ausf_ue_s {
     } edhoc_cred_i;
     /* EDHOC responder session state kept across message_1/message_3 SBI calls. */
     bool edhoc_in_progress;
-    bool edhoc_waiting_message4_ack;
     EdhocResponder edhoc_responder;
     uint8_t edhoc_c_i;
     uint8_t edhoc_c_r;
+    /* EDHOC message_4 staged during the message_3 leg, attached to the
+     * AUTHENTICATION_SUCCESS response in the UDM result-confirmation callback. */
+    char *edhoc_message_4_pending;
 
     uint8_t rand[OGS_RAND_LEN];
     uint8_t xres_star[OGS_MAX_RES_LEN];

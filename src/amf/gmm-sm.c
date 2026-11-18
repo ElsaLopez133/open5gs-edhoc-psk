@@ -401,6 +401,7 @@ void gmm_state_de_registered(ogs_fsm_t *s, amf_event_t *e)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION)
             CASE(OGS_SBI_RESOURCE_NAME_EAP_SESSION)
+            CASE(OGS_SBI_RESOURCE_NAME_EDHOC_SESSION)
                 ogs_error("[%s] Ignore SBI message", amf_ue->supi);
                 break;
 
@@ -1217,6 +1218,7 @@ void gmm_state_registered(ogs_fsm_t *s, amf_event_t *e)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION)
             CASE(OGS_SBI_RESOURCE_NAME_EAP_SESSION)
+            CASE(OGS_SBI_RESOURCE_NAME_EDHOC_SESSION)
                 ogs_error("[%s] Ignore SBI message", amf_ue->supi);
                 break;
 
@@ -2772,6 +2774,7 @@ void gmm_state_security_mode(ogs_fsm_t *s, amf_event_t *e)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION)
             CASE(OGS_SBI_RESOURCE_NAME_EAP_SESSION)
+            CASE(OGS_SBI_RESOURCE_NAME_EDHOC_SESSION)
                 ogs_error("[%s] Ignore SBI message", amf_ue->supi);
                 break;
 
@@ -2960,6 +2963,7 @@ void gmm_state_initial_context_setup(ogs_fsm_t *s, amf_event_t *e)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION)
             CASE(OGS_SBI_RESOURCE_NAME_EAP_SESSION)
+            CASE(OGS_SBI_RESOURCE_NAME_EDHOC_SESSION)
                 ogs_error("[%s] Ignore SBI message", amf_ue->supi);
                 break;
 
@@ -3651,6 +3655,7 @@ void gmm_state_exception(ogs_fsm_t *s, amf_event_t *e)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA)
             CASE(OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION)
             CASE(OGS_SBI_RESOURCE_NAME_EAP_SESSION)
+            CASE(OGS_SBI_RESOURCE_NAME_EDHOC_SESSION)
                 ogs_error("[%s] Ignore SBI message", amf_ue->supi);
                 break;
 

@@ -151,11 +151,11 @@ int ogs_dbi_auth_info(char *supi, ogs_dbi_auth_info_t *auth_info)
                         utf8 = (char *)bson_iter_utf8(&cred_inner_iter, &length);
                         ogs_cpystrn(auth_info->edhoc_kid_hex, utf8,
                             sizeof(auth_info->edhoc_kid_hex));
-                    } else if (!strcmp(key, "cred_i_ccs_psk_hex") &&
+                    } else if (!strcmp(key, "cred_i") &&
                             BSON_ITER_HOLDS_UTF8(&cred_inner_iter)) {
                         utf8 = (char *)bson_iter_utf8(&cred_inner_iter, &length);
-                        ogs_cpystrn(auth_info->edhoc_cred_i_ccs_psk_hex, utf8,
-                            sizeof(auth_info->edhoc_cred_i_ccs_psk_hex));
+                        ogs_cpystrn(auth_info->edhoc_cred_i, utf8,
+                            sizeof(auth_info->edhoc_cred_i));
                     }
                 }
             }

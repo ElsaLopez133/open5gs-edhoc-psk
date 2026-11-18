@@ -23,6 +23,8 @@ typedef struct OpenAPI_confirmation_data_s {
     char *res_star;
     bool is_eap_payload_null;
     char *eap_payload;
+    /* Open5GS EDHOC-PSK extension field: raw EDHOC CBOR bytes, hex-encoded. */
+    char *edhoc_payload;
     char *supported_features;
 } OpenAPI_confirmation_data_t;
 
@@ -31,6 +33,7 @@ OpenAPI_confirmation_data_t *OpenAPI_confirmation_data_create(
     char *res_star,
     bool is_eap_payload_null,
     char *eap_payload,
+    char *edhoc_payload,
     char *supported_features
 );
 void OpenAPI_confirmation_data_free(OpenAPI_confirmation_data_t *confirmation_data);

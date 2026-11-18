@@ -11,6 +11,7 @@ WAIT_TIMEOUT=30
 METHOD=""
 OUTPUT_FILE=""
 TEARDOWN=0
+POST_REGISTRATION_CAPTURE_DELAY="${POST_REGISTRATION_CAPTURE_DELAY:-2}"
 
 usage() {
   cat <<EOF
@@ -115,7 +116,8 @@ wait_for_registration() {
   local waited=0
 
   while (( waited < WAIT_TIMEOUT )); do
-    if [[ -f "${ue_log}" ]] && grep -q 'Initial Registration is successful' "${ue_log}" 2>/dev/null; then
+    if [[ -f "${ue_log}" ]] && \
+        grep -q 'Initial Registration is successful' "${ue_log}" 2>/dev/null; then
       return 0
     fi
     sleep 1
@@ -123,6 +125,11 @@ wait_for_registration() {
   done
 
   return 1
+}
+
+reset_ueransim_logs() {
+  echo "[capture] Resetting stale UERANSIM logs"
+  sudo rm -f "${LOG_DIR}/nr-ue.log" "${LOG_DIR}/nr-gnb.log"
 }
 
 stop_capture() {
@@ -191,6 +198,7 @@ run_registration_cycle() {
   echo "[capture] Restarting Open5GS and UERANSIM"
   "${SCRIPT_DIR}/open5gs_cycle.sh" stop
   "${SCRIPT_DIR}/ueransim_cycle.sh" stop
+  reset_ueransim_logs
   "${SCRIPT_DIR}/open5gs_cycle.sh" all
   "${SCRIPT_DIR}/ueransim_cycle.sh" all
 
@@ -202,6 +210,8 @@ run_registration_cycle() {
 
   REGISTRATION_DONE=1
   echo "[capture] UE registration completed"
+  echo "[capture] Waiting ${POST_REGISTRATION_CAPTURE_DELAY}s to capture trailing NAS traffic"
+  sleep "${POST_REGISTRATION_CAPTURE_DELAY}"
 }
 
 main() {

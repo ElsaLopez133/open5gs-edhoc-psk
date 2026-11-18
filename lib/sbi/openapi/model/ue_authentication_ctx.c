@@ -70,19 +70,23 @@ cJSON *OpenAPI_ue_authentication_ctx_convertToJSON(OpenAPI_ue_authentication_ctx
         goto end;
     }
 
-    if (!ue_authentication_ctx->_5g_auth_data) {
+    if (ue_authentication_ctx->auth_type == OpenAPI_auth_type_5G_AKA &&
+        !ue_authentication_ctx->_5g_auth_data) {
         ogs_error("OpenAPI_ue_authentication_ctx_convertToJSON() failed [_5g_auth_data]");
         return NULL;
     }
-    cJSON *_5g_auth_data_local_JSON = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(ue_authentication_ctx->_5g_auth_data);
-    if (_5g_auth_data_local_JSON == NULL) {
-        ogs_error("OpenAPI_ue_authentication_ctx_convertToJSON() failed [_5g_auth_data]");
-        goto end;
-    }
-    cJSON_AddItemToObject(item, "5gAuthData", _5g_auth_data_local_JSON);
-    if (item->child == NULL) {
-        ogs_error("OpenAPI_ue_authentication_ctx_convertToJSON() failed [_5g_auth_data]");
-        goto end;
+
+    if (ue_authentication_ctx->_5g_auth_data) {
+        cJSON *_5g_auth_data_local_JSON = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(ue_authentication_ctx->_5g_auth_data);
+        if (_5g_auth_data_local_JSON == NULL) {
+            ogs_error("OpenAPI_ue_authentication_ctx_convertToJSON() failed [_5g_auth_data]");
+            goto end;
+        }
+        cJSON_AddItemToObject(item, "5gAuthData", _5g_auth_data_local_JSON);
+        if (item->child == NULL) {
+            ogs_error("OpenAPI_ue_authentication_ctx_convertToJSON() failed [_5g_auth_data]");
+            goto end;
+        }
     }
 
     if (!ue_authentication_ctx->_links) {
@@ -151,14 +155,17 @@ OpenAPI_ue_authentication_ctx_t *OpenAPI_ue_authentication_ctx_parseFromJSON(cJS
     auth_typeVariable = OpenAPI_auth_type_FromString(auth_type->valuestring);
 
     _5g_auth_data = cJSON_GetObjectItemCaseSensitive(ue_authentication_ctxJSON, "5gAuthData");
-    if (!_5g_auth_data) {
+    if (auth_typeVariable == OpenAPI_auth_type_5G_AKA && !_5g_auth_data) {
         ogs_error("OpenAPI_ue_authentication_ctx_parseFromJSON() failed [_5g_auth_data]");
         goto end;
     }
-    _5g_auth_data_local_nonprim = OpenAPI_ue_authentication_ctx_5g_auth_data_parseFromJSON(_5g_auth_data);
-    if (!_5g_auth_data_local_nonprim) {
-        ogs_error("OpenAPI_ue_authentication_ctx_5g_auth_data_parseFromJSON failed [_5g_auth_data]");
-        goto end;
+
+    if (_5g_auth_data) {
+        _5g_auth_data_local_nonprim = OpenAPI_ue_authentication_ctx_5g_auth_data_parseFromJSON(_5g_auth_data);
+        if (!_5g_auth_data_local_nonprim) {
+            ogs_error("OpenAPI_ue_authentication_ctx_5g_auth_data_parseFromJSON failed [_5g_auth_data]");
+            goto end;
+        }
     }
 
     _links = cJSON_GetObjectItemCaseSensitive(ue_authentication_ctxJSON, "_links");
@@ -223,6 +230,7 @@ end:
     return NULL;
 }
 
+
 OpenAPI_ue_authentication_ctx_t *OpenAPI_ue_authentication_ctx_copy(OpenAPI_ue_authentication_ctx_t *dst, OpenAPI_ue_authentication_ctx_t *src)
 {
     cJSON *item = NULL;
@@ -256,4 +264,3 @@ OpenAPI_ue_authentication_ctx_t *OpenAPI_ue_authentication_ctx_copy(OpenAPI_ue_a
 
     return dst;
 }
-

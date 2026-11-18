@@ -30,7 +30,7 @@
 int amf_nausf_auth_handle_authenticate(
         amf_ue_t *amf_ue, ogs_sbi_message_t *message)
 {
-    const char *edhoc_link_key = OGS_SBI_RESOURCE_NAME_EAP_SESSION;
+    const char *edhoc_link_key = OGS_SBI_RESOURCE_NAME_EDHOC_SESSION;
     int r;
     OpenAPI_ue_authentication_ctx_t *UeAuthenticationCtx = NULL;
     OpenAPI_ue_authentication_ctx_5g_auth_data_t *AV5G_AKA = NULL;
@@ -107,7 +107,7 @@ int amf_nausf_auth_handle_authenticate(
     *   “Where do I send the next step back in the core?”
     * That is why _links matters even for EDHOC.
     * if auth type is EDHOC_PSK, look for the link named:
-    *   eap-session
+    *   edhoc-session
     * otherwise look for
     *   5g-aka
      */
@@ -172,13 +172,14 @@ int amf_nausf_auth_handle_authenticate(
 
     // it now stores either:
     // AKA confirmation URI, or
-    // EDHOC eap-session URI
+    // EDHOC edhoc-session URI
     STORE_5G_AKA_CONFIRMATION(amf_ue, LinksValueSchemeValue->href);
 
     // EDHOC branch: send Authentication Request immediately.
-    // Even though this is not AKA, I still use the existing
-    // NAS Authentication Request message as the vehicle to start the UE-side authentication exchange.
-    // And in gmm-build.c, that Authentication Request is modified to contain an EAP payload EDHOC-START.
+    // Even though this is not AKA, I still use the existing NAS Authentication
+    // Request message as the vehicle to start the UE-side exchange.
+    // In gmm-build.c, that Authentication Request carries a zero-length
+    // EDHOC Payload IE (0x7D) as the bootstrap trigger.
     if (UeAuthenticationCtx->auth_type == OpenAPI_auth_type_EDHOC_PSK) {
         /* Clear Security Context */
         CLEAR_SECURITY_CONTEXT(amf_ue);
@@ -243,44 +244,40 @@ int amf_nausf_auth_handle_authenticate_confirmation(
         return OGS_ERROR;
     }
 
-    if (!ConfirmationDataResponse->supi) {
-        ogs_error("[%s] No supi", amf_ue->suci);
-        return OGS_ERROR;
-    }
-
     amf_ue->auth_result = ConfirmationDataResponse->auth_result;
     if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
         amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_ONGOING) {
         int r;
-        /* Ongoing EDHOC leg: AMF receives tunneled EDHOC payload (message_2/message_4)
-         * from AUSF (N12), stores raw bytes, then triggers NAS Authentication Request (N1). */
+        /* Mid-handshake EDHOC leg (currently message_2 only): AUSF returns
+         * AUTHENTICATION_ONGOING with the EDHOC payload to relay. AMF stores
+         * the raw bytes and triggers a NAS Authentication Request (N1). */
 
-        if (!ConfirmationDataResponse->edhoc_eap_payload) {
+        if (!ConfirmationDataResponse->edhoc_payload) {
             ogs_error("[%s] No tunneled EDHOC payload", amf_ue->suci);
             return OGS_ERROR;
         }
 
-        payload_len = strlen(ConfirmationDataResponse->edhoc_eap_payload);
-        if (payload_len == 0 || (payload_len % 2) != 0) {
-            ogs_error("[%s] Invalid tunneled EDHOC payload length [%d]",
-                    amf_ue->suci, payload_len);
-            return OGS_ERROR;
-        }
-
-        payload_len /= 2;
-        if (payload_len > (int)sizeof(amf_ue->edhoc_n1_relay.payload)) {
+        payload_len = ogs_base64_decode_len(
+                ConfirmationDataResponse->edhoc_payload);
+        if (payload_len >
+                (int)sizeof(amf_ue->edhoc_n1_relay.payload) + 1) {
             ogs_error("[%s] Tunneled EDHOC payload too large [%d]",
                     amf_ue->suci, payload_len);
             return OGS_ERROR;
         }
 
-        ogs_ascii_to_hex(ConfirmationDataResponse->edhoc_eap_payload,
-                strlen(ConfirmationDataResponse->edhoc_eap_payload),
+        payload_len = ogs_base64_decode_binary(
                 amf_ue->edhoc_n1_relay.payload,
-                sizeof(amf_ue->edhoc_n1_relay.payload));
+                ConfirmationDataResponse->edhoc_payload);
+        if (payload_len < 0 ||
+            payload_len > (int)sizeof(amf_ue->edhoc_n1_relay.payload)) {
+            ogs_error("[%s] Invalid tunneled EDHOC payload",
+                    amf_ue->suci);
+            return OGS_ERROR;
+        }
         amf_ue->edhoc_n1_relay.payload_len = payload_len;
 
-        ogs_info("EDHOC: relaying EDHOC payload to UE[%s] [%d bytes EAP]",
+        ogs_info("EDHOC: relaying EDHOC payload to UE[%s] [%d bytes]",
                 amf_ue->suci ? amf_ue->suci : "(unknown)", payload_len);
 
         r = nas_5gs_send_authentication_request(amf_ue);
@@ -291,6 +288,47 @@ int amf_nausf_auth_handle_authenticate_confirmation(
     }
 
     if (amf_ue->auth_result == OpenAPI_auth_result_AUTHENTICATION_SUCCESS) {
+        /* For EDHOC-PSK, AUSF attaches message_4 to the SUCCESS response.
+         * Deliver it to the UE in a final NAS Authentication Request that
+         * does not expect a NAS Authentication Response. The UE processes
+         * message_4 silently, and the subsequent NAS Security Mode Command
+         * provides implicit key confirmation. */
+        if (amf_ue->auth_type == OpenAPI_auth_type_EDHOC_PSK &&
+            ConfirmationDataResponse->edhoc_payload) {
+            int r;
+
+            payload_len = ogs_base64_decode_len(
+                    ConfirmationDataResponse->edhoc_payload);
+            if (payload_len >
+                    (int)sizeof(amf_ue->edhoc_n1_relay.payload) + 1) {
+                ogs_error("[%s] message_4 payload too large [%d]",
+                        amf_ue->suci, payload_len);
+                return OGS_ERROR;
+            }
+
+            payload_len = ogs_base64_decode_binary(
+                    amf_ue->edhoc_n1_relay.payload,
+                    ConfirmationDataResponse->edhoc_payload);
+            if (payload_len < 0 ||
+                payload_len > (int)sizeof(amf_ue->edhoc_n1_relay.payload)) {
+                ogs_error("[%s] Invalid message_4 payload", amf_ue->suci);
+                return OGS_ERROR;
+            }
+            amf_ue->edhoc_n1_relay.payload_len = payload_len;
+
+            ogs_info("EDHOC: relaying message_4 to UE[%s] [%d bytes] (no UE response expected)",
+                    amf_ue->suci ? amf_ue->suci : "(unknown)", payload_len);
+
+            r = nas_5gs_send_authentication_request(amf_ue);
+            ogs_expect(r == OGS_OK);
+            ogs_assert(r != OGS_ERROR);
+        }
+
+        if (!ConfirmationDataResponse->supi) {
+            ogs_error("[%s] No supi", amf_ue->suci);
+            return OGS_ERROR;
+        }
+
         if (!ConfirmationDataResponse->kseaf) {
             ogs_error("[%s] No Kseaf", amf_ue->suci);
             return OGS_ERROR;

@@ -288,6 +288,65 @@ int ogs_nas_5gs_encode_eap_message(ogs_pkbuf_t *pkbuf, ogs_nas_eap_message_t *ea
     return eap_message->length + sizeof(eap_message->length);
 }
 
+/* EDHOC payload (non-standard PoC IE)
+ * O TLV-E 4-N */
+int ogs_nas_5gs_decode_edhoc_payload(ogs_nas_edhoc_payload_t *edhoc_payload, ogs_pkbuf_t *pkbuf)
+{
+    int size = 0;
+    ogs_nas_edhoc_payload_t *source = NULL;
+
+    if (pkbuf->len < 2) {
+       ogs_error("Not enough pkbuf [len:%d]", pkbuf->len);
+       return -1;
+    }
+
+    source = (ogs_nas_edhoc_payload_t *)pkbuf->data;
+
+    edhoc_payload->length = be16toh(source->length);
+    size = edhoc_payload->length + sizeof(edhoc_payload->length);
+
+    if (ogs_pkbuf_pull(pkbuf, size) == NULL) {
+       ogs_error("ogs_pkbuf_pull() failed [size:%d]", (int)size);
+       return -1;
+    }
+
+    edhoc_payload->buffer = pkbuf->data - size + sizeof(edhoc_payload->length);
+
+    ogs_trace("  EDHOC_PAYLOAD - ");
+    ogs_log_hexdump(OGS_LOG_TRACE, (void*)edhoc_payload->buffer, edhoc_payload->length);
+
+    return size;
+}
+
+int ogs_nas_5gs_encode_edhoc_payload(ogs_pkbuf_t *pkbuf, ogs_nas_edhoc_payload_t *edhoc_payload)
+{
+    int size = 0;
+    int target;
+
+    ogs_assert(edhoc_payload);
+    /* A zero-length EDHOC payload is used as the EDHOC-START bootstrap marker,
+     * in which case buffer may be NULL. Otherwise buffer must be non-NULL. */
+    ogs_assert(edhoc_payload->length == 0 || edhoc_payload->buffer);
+
+    size = sizeof(edhoc_payload->length);
+    ogs_assert(ogs_pkbuf_pull(pkbuf, size));
+    target = htobe16(edhoc_payload->length);
+    memcpy(pkbuf->data - size, &target, size);
+
+    if (edhoc_payload->length > 0) {
+        size = edhoc_payload->length;
+        ogs_assert(ogs_pkbuf_pull(pkbuf, size));
+        memcpy(pkbuf->data - size, edhoc_payload->buffer, size);
+
+        ogs_trace("  EDHOC_PAYLOAD - ");
+        ogs_log_hexdump(OGS_LOG_TRACE, pkbuf->data - size, size);
+    } else {
+        ogs_trace("  EDHOC_PAYLOAD - (empty, bootstrap)");
+    }
+
+    return edhoc_payload->length + sizeof(edhoc_payload->length);
+}
+
 /* 9.11.2.3 GPRS timer
  * O TV 2 */
 int ogs_nas_5gs_decode_gprs_timer(ogs_nas_gprs_timer_t *gprs_timer, ogs_pkbuf_t *pkbuf)

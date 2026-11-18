@@ -34,7 +34,7 @@ static const uint8_t default_edhoc_responder_r[32] = {
     0x4f, 0x4e, 0x44, 0x45, 0x52, 0x5f, 0x30, 0x32,
 };
 
-static const uint8_t default_edhoc_psk_cred[] = {
+static const uint8_t default_edhoc_cred_r[] = {
     0xA2, 0x02, 0x69, 0x72, 0x65, 0x73, 0x70, 0x6F, 0x6E, 0x64, 0x65,
     0x72, 0x08, 0xA1, 0x01, 0xA3, 0x01, 0x04, 0x02, 0x41, 0x10, 0x20,
     0x50, 0x50, 0x93, 0x0F, 0xF4, 0x62, 0xA7, 0x7A, 0x35, 0x40, 0xCF,
@@ -118,9 +118,9 @@ static int ausf_context_prepare(void)
             sizeof(default_edhoc_responder_r));
     self.edhoc.private_key_len = sizeof(default_edhoc_responder_r);
 
-    memcpy(self.edhoc.credential, default_edhoc_psk_cred,
-            sizeof(default_edhoc_psk_cred));
-    self.edhoc.credential_len = sizeof(default_edhoc_psk_cred);
+    memcpy(self.edhoc.credential, default_edhoc_cred_r,
+            sizeof(default_edhoc_cred_r));
+    self.edhoc.credential_len = sizeof(default_edhoc_cred_r);
 
     return OGS_OK;
 }
@@ -279,7 +279,10 @@ void ausf_ue_remove(ausf_ue_t *ausf_ue)
 
     if (ausf_ue->serving_network_name)
         ogs_free(ausf_ue->serving_network_name);
-    
+
+    if (ausf_ue->edhoc_message_4_pending)
+        ogs_free(ausf_ue->edhoc_message_4_pending);
+
     ogs_pool_id_free(&ausf_ue_pool, ausf_ue);
 }
 

@@ -51,7 +51,7 @@ static const char *links_member_name(OpenAPI_auth_type_e auth_type)
         auth_type == OpenAPI_auth_type_EAP_AKA_PRIME) {
         return OGS_SBI_RESOURCE_NAME_5G_AKA;
     } else if (auth_type == OpenAPI_auth_type_EDHOC_PSK) {
-        return OGS_SBI_RESOURCE_NAME_EAP_SESSION;
+        return OGS_SBI_RESOURCE_NAME_EDHOC_SESSION;
     } else if (auth_type == OpenAPI_auth_type_EAP_TLS) {
         return OGS_SBI_RESOURCE_NAME_EAP_SESSION;
     }
@@ -248,13 +248,13 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         ausf_ue->edhoc_cred_i.kid_len = 0;
         ausf_ue->edhoc_cred_i.cred_i_len = 0;
         if (AuthenticationVector && AuthenticationVector->edhoc_kid &&
-            AuthenticationVector->edhoc_cred_i_ccs_psk_hex) {
+            AuthenticationVector->edhoc_cred_i) {
             if (!edhoc_store_hex_blob(AuthenticationVector->edhoc_kid,
                         ausf_ue->edhoc_cred_i.kid,
                         sizeof(ausf_ue->edhoc_cred_i.kid),
                         &ausf_ue->edhoc_cred_i.kid_len) ||
                 !edhoc_store_hex_blob(
-                        AuthenticationVector->edhoc_cred_i_ccs_psk_hex,
+                        AuthenticationVector->edhoc_cred_i,
                         ausf_ue->edhoc_cred_i.cred_i,
                         sizeof(ausf_ue->edhoc_cred_i.cred_i),
                         &ausf_ue->edhoc_cred_i.cred_i_len)) {
@@ -300,15 +300,8 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         ogs_hex_to_ascii(ausf_ue->hxres_star, sizeof(ausf_ue->hxres_star),
                 hxres_star_string, sizeof(hxres_star_string));
         AV5G_AKA.hxres_star = hxres_star_string;
-    } else {
-        /* EDHOC does not use 5G-AKA challenge material, but the existing
-         * UeAuthenticationCtx schema still requires this object to be present. */
-        AV5G_AKA.rand = (char *)"00";
-        AV5G_AKA.autn = (char *)"00";
-        AV5G_AKA.hxres_star = (char *)"00";
+        UeAuthenticationCtx._5g_auth_data = &AV5G_AKA;
     }
-    // So even for EDHOC, the outgoing UeAuthenticationCtx still carries _5g_auth_data.
-    UeAuthenticationCtx._5g_auth_data = &AV5G_AKA;
 
     memset(&LinksValueSchemeValue, 0, sizeof(LinksValueSchemeValue));
 
@@ -317,15 +310,15 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
     header.api.version = (char *)OGS_SBI_API_V1;
     /*
     * The generated URI depends on the auth type:
-    *   5G-AKA → next resource is 5g-aka-confirmation
-    *   EDHOC-PSK → next resource is eap-session
+    *   5G-AKA    → next resource is 5g-aka-confirmation
+    *   EDHOC-PSK → next resource is edhoc-session
      */
     header.resource.component[0] =
             (char *)OGS_SBI_RESOURCE_NAME_UE_AUTHENTICATIONS;
     header.resource.component[1] = ausf_ue->ctx_id;
     header.resource.component[2] = (char *)(
             AuthenticationInfoResult->auth_type == OpenAPI_auth_type_EDHOC_PSK ?
-            OGS_SBI_RESOURCE_NAME_EAP_SESSION :
+            OGS_SBI_RESOURCE_NAME_EDHOC_SESSION :
             OGS_SBI_RESOURCE_NAME_5G_AKA_CONFIRMATION);
     LinksValueSchemeValue.href = ogs_sbi_server_uri(server, &header);
     LinksValueScheme = OpenAPI_map_create(
@@ -467,6 +460,13 @@ bool ausf_nudm_ueau_handle_result_confirmation_inform(ausf_ue_t *ausf_ue,
         ConfirmationDataResponse.kseaf = kseaf_string;
     }
 
+    /* For EDHOC-PSK, attach message_4 (staged on the message_3 leg) so that
+     * the AMF can deliver it to the UE in the NAS Authentication Result. */
+    if (ausf_ue->edhoc_message_4_pending) {
+        ConfirmationDataResponse.edhoc_payload =
+            ausf_ue->edhoc_message_4_pending;
+    }
+
     memset(&sendmsg, 0, sizeof(sendmsg));
 
     sendmsg.ConfirmationDataResponse = &ConfirmationDataResponse;
@@ -474,6 +474,11 @@ bool ausf_nudm_ueau_handle_result_confirmation_inform(ausf_ue_t *ausf_ue,
     response = ogs_sbi_build_response(&sendmsg, OGS_SBI_HTTP_STATUS_OK);
     ogs_assert(response);
     ogs_assert(true == ogs_sbi_server_send_response(stream, response));
+
+    if (ausf_ue->edhoc_message_4_pending) {
+        ogs_free(ausf_ue->edhoc_message_4_pending);
+        ausf_ue->edhoc_message_4_pending = NULL;
+    }
 
     return true;
 }

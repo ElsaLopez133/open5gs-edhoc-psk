@@ -2219,6 +2219,16 @@ int ogs_nas_5gs_decode_authentication_request(ogs_nas_5gs_message_t *message, og
             authentication_request->presencemask |= OGS_NAS_5GS_AUTHENTICATION_REQUEST_EAP_MESSAGE_PRESENT;
             decoded += size;
             break;
+        case OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_TYPE:
+            size = ogs_nas_5gs_decode_edhoc_payload(&authentication_request->edhoc_payload, pkbuf);
+            if (size < 0) {
+               ogs_error("ogs_nas_5gs_decode_edhoc_payload() failed");
+               return size;
+            }
+
+            authentication_request->presencemask |= OGS_NAS_5GS_AUTHENTICATION_REQUEST_EDHOC_PAYLOAD_PRESENT;
+            decoded += size;
+            break;
         default:
             ogs_error("Unknown type(0x%x) or not implemented\n", type);
             break;
@@ -2266,6 +2276,16 @@ int ogs_nas_5gs_decode_authentication_response(ogs_nas_5gs_message_t *message, o
             }
 
             authentication_response->presencemask |= OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EAP_MESSAGE_PRESENT;
+            decoded += size;
+            break;
+        case OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EDHOC_PAYLOAD_TYPE:
+            size = ogs_nas_5gs_decode_edhoc_payload(&authentication_response->edhoc_payload, pkbuf);
+            if (size < 0) {
+               ogs_error("ogs_nas_5gs_decode_edhoc_payload() failed");
+               return size;
+            }
+
+            authentication_response->presencemask |= OGS_NAS_5GS_AUTHENTICATION_RESPONSE_EDHOC_PAYLOAD_PRESENT;
             decoded += size;
             break;
         default:
